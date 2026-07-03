@@ -37,7 +37,7 @@ export default function RegisterPage() {
     }
   };
 
-  const inputClass = "w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900";
+  const inputClass = "w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-black";
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8"
@@ -88,9 +88,9 @@ export default function RegisterPage() {
             <label className="block text-xs font-medium text-gray-600 mb-1">Teléfono celular</label>
             <div className="flex gap-2">
               <input readOnly value={dialCode}
-                className="w-20 px-3 py-2 text-sm border rounded-lg bg-gray-50 text-gray-900 outline-none" />
+                className="w-20 px-3 py-2 text-sm border rounded-lg bg-gray-50 text-black outline-none" />
               <input type="tel" required value={form.phone} onChange={(e) => update('phone', e.target.value)}
-                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+                className="flex-1 px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-black"
                 placeholder="555 123 4567" />
             </div>
           </div>
