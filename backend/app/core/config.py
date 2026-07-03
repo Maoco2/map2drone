@@ -1,8 +1,8 @@
+import json
+import os
 from dotenv import load_dotenv
 
 load_dotenv()
-
-import os
 
 
 DATABASE_URL: str = os.getenv(
@@ -15,7 +15,9 @@ ALGORITHM: str = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-CORS_ORIGINS: list[str] = ["http://localhost:5173"]
+CORS_ORIGINS: list[str] = json.loads(
+    os.getenv("CORS_ORIGINS", '["http://localhost:5173"]')
+)
 
 PROJECT_NAME: str = "Map2Drone"
 VERSION: str = "0.1.0"

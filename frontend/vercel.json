@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://map2drone.onrender.com/api/$1"
+    }
+  ]
+}
