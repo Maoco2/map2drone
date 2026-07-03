@@ -320,10 +320,15 @@ def _terrain_waypoints_from_segments(
     sample_interval_m: float = 10,
     elevation_threshold: float = 5,
     min_spacing_m: float = 0,
-) -> list[WaypointSchema]:
-    """Ground mode: vertex waypoints + additional waypoints at DEM break points."""
+    ref_ground: Optional[float] = None,
+) -> tuple[list[WaypointSchema], float]:
+    """Ground mode: vertex waypoints + additional waypoints at DEM break points.
+
+    Returns (waypoints, ref_ground) where ref_ground is the elevation used
+    as the terrain reference for altitude calculation.
+    """
     if not segments:
-        return []
+        return [], ref_ground or 0.0
 
     dem_samples: list[tuple[float, float, float]] = []
 
@@ -340,7 +345,10 @@ def _terrain_waypoints_from_segments(
     elevations = elevation_provider.get_elevations(pts) if elevation_provider else [0.0] * len(pts)
 
     if not elevations or max(elevations) <= 0:
-        return _vertex_waypoints_from_segments(segments, altitude)
+        return _vertex_waypoints_from_segments(segments, altitude), ref_ground or 0.0
+
+    if ref_ground is None:
+        ref_ground = elevations[0]
 
     wps: list[WaypointSchema] = []
     sample_idx = 0
@@ -352,7 +360,7 @@ def _terrain_waypoints_from_segments(
         for j in range(n):
             lat, lng, hdg = dem_samples[sample_idx]
             elev = elevations[sample_idx]
-            adj_alt = max(10, altitude + elev)
+            adj_alt = max(10, altitude + (elev - ref_ground))
             sample_idx += 1
 
             should_add = (j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold)
@@ -375,7 +383,7 @@ def _terrain_waypoints_from_segments(
             if j != n - 1:
                 last_break_elev = elev
 
-    return wps
+    return wps, ref_ground
 
 
 # ---------------------------------------------------------------------------
@@ -470,17 +478,18 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
             waypoints.extend(waypoints_b)
         photo_count = sum(s["num_photos"] for s in all_segments)
     else:  # "terrain"
-        waypoints = _terrain_waypoints_from_segments(segments_a, angle_a, req.altitude, center_lat, center_lon,
-                                                       elevation_provider=elevation_provider,
-                                                       sample_interval_m=dem_sample_interval,
-                                                       elevation_threshold=dem_elevation_threshold,
-                                                       min_spacing_m=min_wp_spacing)
+        waypoints, ref_ground = _terrain_waypoints_from_segments(segments_a, angle_a, req.altitude, center_lat, center_lon,
+                                                                   elevation_provider=elevation_provider,
+                                                                   sample_interval_m=dem_sample_interval,
+                                                                   elevation_threshold=dem_elevation_threshold,
+                                                                   min_spacing_m=min_wp_spacing)
         if angle_b is not None:
-            waypoints_b = _terrain_waypoints_from_segments(segments_b, angle_b, req.altitude, center_lat, center_lon,
-                                                            elevation_provider=elevation_provider,
-                                                            sample_interval_m=dem_sample_interval,
-                                                            elevation_threshold=dem_elevation_threshold,
-                                                            min_spacing_m=min_wp_spacing)
+            waypoints_b, _ = _terrain_waypoints_from_segments(segments_b, angle_b, req.altitude, center_lat, center_lon,
+                                                               elevation_provider=elevation_provider,
+                                                               sample_interval_m=dem_sample_interval,
+                                                               elevation_threshold=dem_elevation_threshold,
+                                                               min_spacing_m=min_wp_spacing,
+                                                               ref_ground=ref_ground)
             waypoints.extend(waypoints_b)
         photo_count = sum(s["num_photos"] for s in all_segments)
 
