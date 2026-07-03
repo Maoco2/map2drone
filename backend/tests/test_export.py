@@ -157,20 +157,6 @@ def test_export_gpx():
 
 # --- API endpoint tests ---
 
-def test_api_export_legacy_litchi():
-    resp = client.post("/api/v1/export/litchi", json={
-        "filename": "Test",
-        "waypoints": SAMPLE_WPS,
-        "speed": 10,
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "csv" in data
-    assert "filename" in data
-    lines = data["csv"].strip().split("\n")
-    assert len(lines) == 4
-
-
 def test_api_export_unified():
     for fmt in ["litchi", "dji_wpml", "qgc", "mission_planner", "kml", "geojson", "gpx"]:
         resp = client.post(f"/api/v1/export/{fmt}", json={
@@ -211,5 +197,4 @@ def test_api_export_validation_failure():
         "waypoints": [],
     })
     assert resp.status_code == 200
-    data = resp.json()
-    assert "latitude" in data["csv"]
+    assert "latitude" in resp.text

@@ -270,32 +270,6 @@ def get_export_formats():
     return list_exporters()
 
 
-# Legacy litchi endpoint (keep for backward compatibility)
-@router.post("/export/litchi")
-def export_litchi(data: dict):
-    from app.modules.export.litchi import LitchiExporter
-    exporter = LitchiExporter()
-    from app.schemas.schemas import ExportWaypointSchema
-    waypoints = [ExportWaypointSchema(**wp) for wp in data.get("waypoints", [])]
-    export_wps = [
-        ExportWaypoint(
-            latitude=wp.latitude, longitude=wp.longitude,
-            altitude=wp.altitude, heading=wp.heading,
-            action_type=wp.action_type, action_param=wp.action_param,
-        )
-        for wp in waypoints
-    ]
-    mission = MissionExportData(
-        project_name=data.get("filename", "mission").replace(".csv", ""),
-        waypoints=export_wps,
-        speed_ms=data.get("speed", 10),
-        waypoint_mode="photo",
-    )
-    result = exporter.export(mission)
-    csv = result.data if isinstance(result.data, str) else result.data.decode("utf-8")
-    return {"csv": csv, "filename": result.filename}
-
-
 @router.post("/export/multi")
 def export_multi(req: MultiExportRequest):
     import io, zipfile

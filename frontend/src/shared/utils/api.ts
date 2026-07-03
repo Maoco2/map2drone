@@ -145,11 +145,6 @@ export const api = {
         body: JSON.stringify(data),
       }),
 
-    litchi: (data: { waypoints: { latitude: number; longitude: number; altitude: number; heading: number; action_type?: number; action_param?: number }[]; speed?: number; filename?: string }) =>
-      fetchJson<{ csv: string; filename: string }>('/export/litchi', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
   },
 };
 
