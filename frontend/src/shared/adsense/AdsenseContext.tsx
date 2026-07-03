@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 
 const CONSENT_KEY = 'map2drone_adsense_consent';
-const ADSENSE_CLIENT = 'ca-pub-0000000000000000';
+const ADSENSE_CLIENT = 'ca-pub-2910877941510421';
 
 interface AdsenseContextValue {
   consented: boolean;
