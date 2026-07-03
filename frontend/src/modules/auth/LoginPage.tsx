@@ -41,13 +41,13 @@ export default function LoginPage() {
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
             <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
               placeholder="tu@email.com" />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Contraseña</label>
             <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-sm border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
               placeholder="••••••••" />
           </div>
           <button type="submit" disabled={loading}
