@@ -5,7 +5,6 @@ import LandingPage from '@/modules/auth/LandingPage';
 import PrivacyPage from '@/modules/privacy/PrivacyPage';
 import ProtectedRoute from '@/modules/auth/ProtectedRoute';
 import { AdsenseProvider } from '@/shared/adsense/AdsenseContext';
-import CookieConsent from '@/shared/components/CookieConsent';
 
 export default function App() {
   return (
@@ -22,7 +21,6 @@ export default function App() {
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        <CookieConsent />
       </BrowserRouter>
     </AdsenseProvider>
   );
