@@ -1,0 +1,42 @@
+[project]
+name = "map2drone-backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]",
+    "sqlalchemy>=2.0",
+    "geoalchemy2",
+    "psycopg2-binary",
+    "alembic",
+    "python-dotenv",
+    "pydantic>=2.0",
+    "pyproj",
+    "numpy",
+    "scipy",
+    "shapely",
+    "python-multipart",
+    "python-jose[cryptography]",
+    "passlib[bcrypt]",
+    "tifffile>=2024.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx",
+    "pytest",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.mypy]
+strict = false
+ignore_missing_imports = true

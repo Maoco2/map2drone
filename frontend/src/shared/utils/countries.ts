@@ -1,0 +1,48 @@
+export interface Country {
+  code: string;
+  name: string;
+  dial: string;
+}
+
+export const COUNTRIES: Country[] = [
+  { code: "MX", name: "México", dial: "+52" },
+  { code: "AR", name: "Argentina", dial: "+54" },
+  { code: "BO", name: "Bolivia", dial: "+591" },
+  { code: "BR", name: "Brasil", dial: "+55" },
+  { code: "CL", name: "Chile", dial: "+56" },
+  { code: "CO", name: "Colombia", dial: "+57" },
+  { code: "CR", name: "Costa Rica", dial: "+506" },
+  { code: "CU", name: "Cuba", dial: "+53" },
+  { code: "DO", name: "República Dominicana", dial: "+1" },
+  { code: "EC", name: "Ecuador", dial: "+593" },
+  { code: "SV", name: "El Salvador", dial: "+503" },
+  { code: "GT", name: "Guatemala", dial: "+502" },
+  { code: "HN", name: "Honduras", dial: "+504" },
+  { code: "NI", name: "Nicaragua", dial: "+505" },
+  { code: "PA", name: "Panamá", dial: "+507" },
+  { code: "PY", name: "Paraguay", dial: "+595" },
+  { code: "PE", name: "Perú", dial: "+51" },
+  { code: "UY", name: "Uruguay", dial: "+598" },
+  { code: "VE", name: "Venezuela", dial: "+58" },
+  { code: "ES", name: "España", dial: "+34" },
+  { code: "US", name: "Estados Unidos", dial: "+1" },
+  { code: "CA", name: "Canadá", dial: "+1" },
+  { code: "FR", name: "Francia", dial: "+33" },
+  { code: "DE", name: "Alemania", dial: "+49" },
+  { code: "IT", name: "Italia", dial: "+39" },
+  { code: "PT", name: "Portugal", dial: "+351" },
+  { code: "UK", name: "Reino Unido", dial: "+44" },
+  { code: "JP", name: "Japón", dial: "+81" },
+  { code: "CN", name: "China", dial: "+86" },
+  { code: "KR", name: "Corea del Sur", dial: "+82" },
+  { code: "IN", name: "India", dial: "+91" },
+  { code: "AU", name: "Australia", dial: "+61" },
+  { code: "NZ", name: "Nueva Zelanda", dial: "+64" },
+  { code: "ZA", name: "Sudáfrica", dial: "+27" },
+  { code: "EG", name: "Egipto", dial: "+20" },
+  { code: "NG", name: "Nigeria", dial: "+234" },
+  { code: "KE", name: "Kenia", dial: "+254" },
+  { code: "MA", name: "Marruecos", dial: "+212" },
+  { code: "RU", name: "Rusia", dial: "+7" },
+  { code: "TR", name: "Turquía", dial: "+90" },
+];
