@@ -326,7 +326,6 @@ def _terrain_waypoints_from_segments(
         return []
 
     dem_samples: list[tuple[float, float, float]] = []
-    seg_indices: list[int] = []
 
     for seg in segments:
         n = max(2, int(seg["seg_len"] / sample_interval_m))
@@ -336,7 +335,6 @@ def _terrain_waypoints_from_segments(
             x_m, y_m = _rotate_points([[x_rot, seg["y_rot"]]], sweep_deg)[0]
             lng, lat = _meters_to_lnglat([[x_m, y_m]], center_lat, center_lon)[0]
             dem_samples.append((lat, lng, seg["heading"]))
-            seg_indices.append(len(segments) - 1)
 
     pts = [(lat, lng) for lat, lng, _ in dem_samples]
     elevations = elevation_provider.get_elevations(pts) if elevation_provider else [0.0] * len(pts)
@@ -344,7 +342,6 @@ def _terrain_waypoints_from_segments(
     if not elevations or max(elevations) <= 0:
         return _vertex_waypoints_from_segments(segments, altitude)
 
-    ref_ground = elevations[0]
     wps: list[WaypointSchema] = []
     sample_idx = 0
 
@@ -355,7 +352,7 @@ def _terrain_waypoints_from_segments(
         for j in range(n):
             lat, lng, hdg = dem_samples[sample_idx]
             elev = elevations[sample_idx]
-            adj_alt = max(10, altitude + (elev - ref_ground))
+            adj_alt = max(10, altitude + elev)
             sample_idx += 1
 
             should_add = (j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold)
