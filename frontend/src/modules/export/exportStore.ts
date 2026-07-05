@@ -65,6 +65,8 @@ export function buildExportData(gridResult: GridResult, projectName: string) {
       action_type: wp.action_type ?? -1,
       action_param: wp.action_param ?? 0,
     })),
+    home_latitude: gridResult.waypoints?.[0]?.latitude ?? 0,
+    home_longitude: gridResult.waypoints?.[0]?.longitude ?? 0,
     altitude: gridResult.waypoints?.[0]?.altitude ?? 100,
     speed: gridResult.recommended_speed_ms ?? 10,
     altitude_mode: 'takeoff',

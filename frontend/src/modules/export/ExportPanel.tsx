@@ -1,7 +1,8 @@
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { api } from '@/shared/utils/api';
 import { useExportStore, buildExportData } from './exportStore';
 import { useMissionStore } from '@/modules/missions/planningStore';
+import type { Drone } from '@/shared/types/project';
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -24,6 +25,8 @@ export default function ExportPanel() {
     api.export.listFormats().then(setFormats).catch(() => {});
   }, [setFormats]);
 
+  const dronesRef = useRef<Drone[] | null>(null);
+
   const handleExport = useCallback(async () => {
     if (!gridResult || selectedFormats.length === 0) return;
     setStatus('exporting');
@@ -31,10 +34,16 @@ export default function ExportPanel() {
     setError(null);
 
     try {
+      if (!dronesRef.current) {
+        dronesRef.current = await api.drones.list();
+      }
+      const droneId = useMissionStore.getState().droneId;
+      const drone = dronesRef.current.find((d) => d.id === droneId);
+
       const data = {
         ...buildExportData(gridResult, projectName),
         altitude_mode: useMissionStore.getState().altitudeMode,
-        drone_name: useMissionStore.getState().droneId,
+        drone_name: drone?.name ?? droneId,
       };
 
       if (selectedFormats.length === 1) {

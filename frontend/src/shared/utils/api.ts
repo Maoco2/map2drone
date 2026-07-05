@@ -29,7 +29,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
       if (res.status === 401) clearAuth();
       const body = await res.text().catch(() => '');
       let detail = `API error: ${res.status}`;
-      try { const j = JSON.parse(body); detail = j.detail || detail; } catch {}
+      try { const j = JSON.parse(body); detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || detail; } catch {}
       throw new Error(detail);
     }
     return res.json();
@@ -58,7 +58,7 @@ async function fetchBlob(url: string, init?: RequestInit): Promise<Blob> {
       if (res.status === 401) clearAuth();
       const body = await res.text().catch(() => '');
       let detail = `API error: ${res.status}`;
-      try { const j = JSON.parse(body); detail = j.detail || detail; } catch {}
+      try { const j = JSON.parse(body); detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || detail; } catch {}
       throw new Error(detail);
     }
     return res.blob();
