@@ -38,10 +38,9 @@ function WaypointDebugTable({ waypoints, altitudeMode }: { waypoints: Waypoint[]
                 <th className="pr-2">#</th>
                 <th className="pr-2">Lat</th>
                 <th className="pr-2">Lng</th>
-                <th className="pr-2">Alt MSL</th>
+                <th className="pr-2">Altitude</th>
                 {isTerrain && <th className="pr-2">AGL</th>}
-                {isTerrain && <th className="pr-2">Elev MSL</th>}
-                <th>Hdg</th>
+                {isTerrain && <th className="pr-2">Elevación</th>}
               </tr>
             </thead>
             <tbody>
@@ -53,7 +52,6 @@ function WaypointDebugTable({ waypoints, altitudeMode }: { waypoints: Waypoint[]
                   <td className="pr-2">{wp.altitude.toFixed(1)}</td>
                   {isTerrain && <td className="pr-2">{wp.agl?.toFixed(1) ?? '—'}</td>}
                   {isTerrain && <td className="pr-2">{wp.elevation_msnm?.toFixed(1) ?? '—'}</td>}
-                  <td>{wp.heading.toFixed(0)}</td>
                 </tr>
               ))}
             </tbody>
