@@ -101,7 +101,7 @@ export default function PrivacyPage() {
           <h2 className="text-lg font-semibold">7. Contact</h2>
           <p>
             For any privacy-related inquiries, please contact us at{' '}
-            <span className="font-mono" style={{ color: '#4f8cff' }}>privacy@map2drone.app</span>.
+            <span className="font-mono" style={{ color: '#4f8cff' }}>contacto@map2drone.app</span>.
           </p>
         </section>
       </main>

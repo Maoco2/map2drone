@@ -3,6 +3,7 @@ import MainLayout from './layouts/MainLayout';
 import ProjectPage from '@/modules/projects/ProjectPage';
 import LandingPage from '@/modules/auth/LandingPage';
 import PrivacyPage from '@/modules/privacy/PrivacyPage';
+import AboutPage from '@/modules/about/AboutPage';
 import ProtectedRoute from '@/modules/auth/ProtectedRoute';
 import { AdsenseProvider } from '@/shared/adsense/AdsenseContext';
 
@@ -13,6 +14,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route element={<ProtectedRoute />}>
             <Route element={<MainLayout />}>
               <Route path="/projects" element={<ProjectPage />} />
