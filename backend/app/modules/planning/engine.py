@@ -379,6 +379,8 @@ def _terrain_waypoints_from_segments(
                 latitude=lat, longitude=lng,
                 altitude=adj_alt, heading=hdg,
                 action_type=-1,
+                elevation_msnm=elev,
+                agl=altitude,
             ))
             if j != n - 1:
                 last_break_elev = elev

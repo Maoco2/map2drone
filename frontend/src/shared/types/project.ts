@@ -56,6 +56,8 @@ export interface Waypoint {
   speed?: number;
   action_type?: number;
   action_param?: number;
+  elevation_msnm?: number;
+  agl?: number;
 }
 
 export interface Drone {

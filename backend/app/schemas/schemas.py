@@ -100,6 +100,8 @@ class WaypointSchema(BaseModel):
     speed: Optional[float] = None
     action_type: Optional[int] = -1
     action_param: Optional[float] = 0
+    elevation_msnm: Optional[float] = None
+    agl: Optional[float] = None
 
 
 class GridRequest(BaseModel):
