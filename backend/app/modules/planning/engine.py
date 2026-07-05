@@ -360,7 +360,7 @@ def _terrain_waypoints_from_segments(
         for j in range(n):
             lat, lng, hdg = dem_samples[sample_idx]
             elev = elevations[sample_idx]
-            adj_alt = max(10, altitude + (elev - ref_ground))
+            adj_alt = altitude + (elev - ref_ground)
             sample_idx += 1
 
             should_add = (j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold)
