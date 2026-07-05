@@ -26,7 +26,6 @@
   html, body, #root {
     height: 100%;
     width: 100%;
-    overflow: hidden;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     background-color: var(--color-surface);
     color: var(--color-text);
