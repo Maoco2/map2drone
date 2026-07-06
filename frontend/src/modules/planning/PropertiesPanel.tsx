@@ -7,68 +7,8 @@ import { useMissionStore } from '@/modules/missions/planningStore';
 import { useSidebarStore } from '@/app/layouts/sidebarStore';
 import { useProjectStore } from '@/modules/projects/store';
 import { useMissionListStore } from '@/modules/missions/missionListStore';
-import type { Drone, Camera, Waypoint } from '@/shared/types/project';
+import type { Drone, Camera } from '@/shared/types/project';
 import AdSlot from '@/shared/components/AdSlot';
-
-// DEBUG: temporary waypoint table for verifying ground mode
-function WaypointDebugTable({ waypoints, altitudeMode }: { waypoints: Waypoint[]; altitudeMode: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [showAll, setShowAll] = useState(false);
-  const display = showAll ? waypoints : waypoints.slice(0, 50);
-  const isTerrain = altitudeMode === 'ground';
-
-  return (
-    <div className="space-y-1">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full py-1.5 text-[10px] rounded font-medium border transition-colors hover:opacity-90"
-        style={{
-          backgroundColor: expanded ? '#ff9800' : 'transparent',
-          borderColor: '#ff9800',
-          color: expanded ? '#fff' : '#ff9800',
-        }}
-      >
-        {expanded ? 'Hide' : '🛠 Show'} Waypoint Table ({waypoints.length} wps)
-      </button>
-      {expanded && (
-        <div className="overflow-x-auto text-[10px]" style={{ color: 'var(--color-text)' }}>
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="text-left" style={{ color: 'var(--color-text-secondary)' }}>
-                <th className="pr-2">#</th>
-                <th className="pr-2">Lat</th>
-                <th className="pr-2">Lng</th>
-                <th className="pr-2">Altitude</th>
-                {isTerrain && <th className="pr-2">AGL</th>}
-                {isTerrain && <th className="pr-2">Elevación</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {display.map((wp, i) => (
-                <tr key={i} className="font-mono" style={{ color: 'var(--color-text)' }}>
-                  <td className="pr-2 opacity-60">{i}</td>
-                  <td className="pr-2">{wp.latitude.toFixed(4)}</td>
-                  <td className="pr-2">{wp.longitude.toFixed(4)}</td>
-                  <td className="pr-2">{wp.altitude.toFixed(1)}</td>
-                  {isTerrain && <td className="pr-2">{wp.agl?.toFixed(1) ?? '—'}</td>}
-                  {isTerrain && <td className="pr-2">{wp.elevation_msnm?.toFixed(1) ?? '—'}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {!showAll && waypoints.length > 50 && (
-            <button
-              onClick={() => setShowAll(true)}
-              className="w-full py-1 text-[10px] underline opacity-60 hover:opacity-100"
-            >
-              Show all {waypoints.length} waypoints
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function getPolygonPoints(f: DrawFeature): { lng: number; lat: number }[] {
   if (f.type === 'rectangle' && f.points.length >= 2) {
@@ -398,8 +338,6 @@ export default function PropertiesPanel() {
             </button>
 
             <AdSlot slotId="properties-rectangle" format="rectangle" className="py-2" />
-
-            <WaypointDebugTable waypoints={gridResult.waypoints} altitudeMode={altitudeMode} />
           </>
         )}
       </div>
