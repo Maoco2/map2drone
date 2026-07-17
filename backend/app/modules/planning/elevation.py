@@ -4,6 +4,7 @@ import io
 import json
 import math
 import os
+import urllib.parse
 import urllib.request
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -139,12 +140,73 @@ class MapboxTerrainRgbProvider(ElevationProvider):
         return "Mapbox Terrain-RGB (~10m)"
 
 
+class OpenTopographyProvider(ElevationProvider):
+    """Elevation via OpenTopography Point Elevation API.
+
+    Supports COP30 (Copernicus GLO-30), ANADEM (South America DTM), and others.
+    Requires OPENTOPOGRAPHY_API_KEY env var. Free tier: 200 calls/24h (academic).
+    Closest to Google Earth DEM quality.
+    """
+
+    BASE_URL = "https://portal.opentopography.org/API/v1/elevation"
+
+    def __init__(self, api_key: str, demtype: str = "COP30") -> None:
+        self.api_key = api_key
+        self.demtype = demtype
+        self._cache: dict[tuple[float, float], float] = {}
+
+    def display_name(self) -> str:
+        name_map = {"COP30": "Copernicus GLO-30", "ANADEM": "ANADEM"}
+        return f"OpenTopography {name_map.get(self.demtype, self.demtype)} (~30m)"
+
+    def get_elevations(self, points: list[tuple[float, float]]) -> list[float]:
+        if not points:
+            return []
+        elevations: list[float] = [0.0] * len(points)
+        uncached: list[tuple[int, float, float]] = []
+        for idx, (lat, lng) in enumerate(points):
+            key = (round(lat, 6), round(lng, 6))
+            cached = self._cache.get(key)
+            if cached is not None:
+                elevations[idx] = cached
+            else:
+                uncached.append((idx, lat, lng))
+        for idx, lat, lng in uncached:
+            elev = self._fetch_point(lat, lng)
+            self._cache[(round(lat, 6), round(lng, 6))] = elev
+            elevations[idx] = elev
+        return elevations
+
+    def _fetch_point(self, lat: float, lng: float) -> float:
+        params = urllib.parse.urlencode({
+            "longitude": lng, "latitude": lat,
+            "dataset": self.demtype, "API_Key": self.api_key,
+        })
+        url = f"{self.BASE_URL}?{params}"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Map2Drone/1.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode())
+                return float(data["Elevation"])
+        except Exception:
+            return 0.0
+
+
 def create_provider() -> ElevationProvider:
     """Create an ElevationProvider based on env config.
 
-    ELEVATION_SOURCE=mapbox  → Mapbox Terrain-RGB (requires MAPBOX_TOKEN)
-    otherwise                → Open-Elevation API (free, SRTM ~30m)
+    Priority:
+      1. OPENTOPOGRAPHY_API_KEY present → OpenTopography (COP30 by default)
+      2. ELEVATION_SOURCE=mapbox + MAPBOX_TOKEN → Mapbox Terrain-RGB
+      3. Otherwise → Open-Elevation API (free, SRTM ~30m, no key needed)
+
+    OPENTOPOGRAPHY_DEMTYPE can be set to ANADEM, COP30, AW3D30, etc.
     """
+    api_key = os.getenv("OPENTOPOGRAPHY_API_KEY", "").strip()
+    if api_key:
+        demtype = os.getenv("OPENTOPOGRAPHY_DEMTYPE", "COP30").strip()
+        return OpenTopographyProvider(api_key, demtype)
+
     source = os.getenv("ELEVATION_SOURCE", "").lower()
     if source == "mapbox":
         token = os.getenv("MAPBOX_TOKEN")
