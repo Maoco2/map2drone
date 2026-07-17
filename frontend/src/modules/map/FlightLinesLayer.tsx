@@ -44,10 +44,11 @@ const waypointLabelLayer: LayerProps = {
   filter: ['==', ['get', 'type'], 'waypoint'],
   layout: {
     'text-field': ['to-string', ['get', 'index']],
-    'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-    'text-size': 12,
+    'text-font': ['Noto Sans Bold'],
+    'text-size': 11,
     'text-anchor': 'center',
-    'text-offset': [0, 0],
+    'text-allow-overlap': true,
+    'text-ignore-placement': true,
   },
   paint: {
     'text-color': '#ffffff',
@@ -60,10 +61,12 @@ const waypointAltLayer: LayerProps = {
   filter: ['==', ['get', 'type'], 'waypoint'],
   layout: {
     'text-field': ['concat', ['to-string', ['get', 'altitude']], 'm'],
-    'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'],
+    'text-font': ['Noto Sans Regular'],
     'text-size': 9,
     'text-anchor': 'top',
-    'text-offset': [0, 1.8],
+    'text-offset': [0, 1.5],
+    'text-allow-overlap': true,
+    'text-ignore-placement': true,
   },
   paint: {
     'text-color': '#f1c40f',
