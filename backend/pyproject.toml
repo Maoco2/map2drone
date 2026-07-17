@@ -19,6 +19,7 @@ dependencies = [
     "python-jose[cryptography]",
     "passlib[bcrypt]",
     "tifffile>=2024.0",
+    "imagecodecs>=2024.0",
 ]
 
 [project.optional-dependencies]
