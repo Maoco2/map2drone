@@ -26,15 +26,49 @@ const giroLineLayer: LayerProps = {
   },
 };
 
-const waypointLayer: LayerProps = {
-  id: 'flight-waypoints',
+const waypointCircleLayer: LayerProps = {
+  id: 'flight-waypoints-circle',
   type: 'circle',
   filter: ['==', ['get', 'type'], 'waypoint'],
   paint: {
-    'circle-radius': 4,
-    'circle-color': '#00e676',
+    'circle-radius': ['case', ['>=', ['get', 'index'], 100], 14, 11],
+    'circle-color': '#1a5276',
     'circle-stroke-width': 1.5,
     'circle-stroke-color': '#ffffff',
+  },
+};
+
+const waypointLabelLayer: LayerProps = {
+  id: 'flight-waypoints-label',
+  type: 'symbol',
+  filter: ['==', ['get', 'type'], 'waypoint'],
+  layout: {
+    'text-field': ['to-string', ['get', 'index']],
+    'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+    'text-size': 12,
+    'text-anchor': 'center',
+    'text-offset': [0, 0],
+  },
+  paint: {
+    'text-color': '#ffffff',
+  },
+};
+
+const waypointAltLayer: LayerProps = {
+  id: 'flight-waypoints-alt',
+  type: 'symbol',
+  filter: ['==', ['get', 'type'], 'waypoint'],
+  layout: {
+    'text-field': ['concat', ['to-string', ['get', 'altitude']], 'm'],
+    'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'],
+    'text-size': 9,
+    'text-anchor': 'top',
+    'text-offset': [0, 1.8],
+  },
+  paint: {
+    'text-color': '#f1c40f',
+    'text-halo-color': '#000000',
+    'text-halo-width': 2,
   },
 };
 
@@ -63,7 +97,9 @@ export default function FlightLinesLayer() {
     <Source id="flight-lines" type="geojson" data={data}>
       <Layer {...scanLineLayer} />
       <Layer {...giroLineLayer} />
-      <Layer {...waypointLayer} />
+      <Layer {...waypointCircleLayer} />
+      <Layer {...waypointLabelLayer} />
+      <Layer {...waypointAltLayer} />
       <Layer {...photoTriggerLayer} />
     </Source>
   );

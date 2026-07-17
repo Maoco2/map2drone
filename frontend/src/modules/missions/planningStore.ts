@@ -121,7 +121,7 @@ export const useMissionStore = create<MissionState>((set) => ({
       type: 'Feature',
       id: `wp_${i}`,
       geometry: { type: 'Point', coordinates: [wp.longitude, wp.latitude] },
-      properties: { index: i, altitude: wp.altitude, heading: wp.heading, type: 'waypoint' },
+      properties: { index: i + 1, altitude: wp.altitude, heading: wp.heading, type: 'waypoint' },
     }));
 
     const photoTriggers = interpolatePhotoPoints(waypoints, result.photo_spacing, isInterval);
