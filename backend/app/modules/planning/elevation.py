@@ -15,6 +15,12 @@ try:
 except ImportError:
     HAS_PILLOW = False
 
+try:
+    import tifffile
+    HAS_TIFFFILE = True
+except ImportError:
+    HAS_TIFFFILE = False
+
 
 class ElevationProvider(ABC):
     """Abstract elevation data provider."""
@@ -141,55 +147,94 @@ class MapboxTerrainRgbProvider(ElevationProvider):
 
 
 class OpenTopographyProvider(ElevationProvider):
-    """Elevation via OpenTopography Point Elevation API.
+    """Elevation via OpenTopography GlobalDEM API (GeoTIFF per bounding box).
 
+    Downloads a single GeoTIFF covering all requested points, then reads
+    elevations locally. This is much faster than point-by-point API calls.
     Supports COP30 (Copernicus GLO-30), ANADEM (South America DTM), and others.
-    Requires OPENTOPOGRAPHY_API_KEY env var. Free tier: 200 calls/24h (academic).
-    Closest to Google Earth DEM quality.
+    Requires OPENTOPOGRAPHY_API_KEY env var.
     """
 
-    BASE_URL = "https://portal.opentopography.org/API/v1/elevation"
+    BASE_URL = "https://portal.opentopography.org/API/globaldem"
 
     def __init__(self, api_key: str, demtype: str = "COP30") -> None:
         self.api_key = api_key
         self.demtype = demtype
-        self._cache: dict[tuple[float, float], float] = {}
+        self._cached_raster: Optional[tuple[float, float, float, float, str, bytes]] = None
 
     def display_name(self) -> str:
         name_map = {"COP30": "Copernicus GLO-30", "ANADEM": "ANADEM"}
         return f"OpenTopography {name_map.get(self.demtype, self.demtype)} (~30m)"
 
     def get_elevations(self, points: list[tuple[float, float]]) -> list[float]:
-        if not points:
-            return []
-        elevations: list[float] = [0.0] * len(points)
-        uncached: list[tuple[int, float, float]] = []
-        for idx, (lat, lng) in enumerate(points):
-            key = (round(lat, 6), round(lng, 6))
-            cached = self._cache.get(key)
-            if cached is not None:
-                elevations[idx] = cached
-            else:
-                uncached.append((idx, lat, lng))
-        for idx, lat, lng in uncached:
-            elev = self._fetch_point(lat, lng)
-            self._cache[(round(lat, 6), round(lng, 6))] = elev
-            elevations[idx] = elev
-        return elevations
+        if not points or not HAS_TIFFFILE:
+            return [0.0] * len(points)
 
-    def _fetch_point(self, lat: float, lng: float) -> float:
+        lats = [p[0] for p in points]
+        lngs = [p[1] for p in points]
+        south, north = min(lats), max(lats)
+        west, east = min(lngs), max(lngs)
+        # Small padding to avoid edge
+        pad = 0.001
+        south, north = south - pad, north + pad
+        west, east = west - pad, east + pad
+
+        cache_key = (south, north, west, east, self.demtype)
+        if self._cached_raster is None or self._cached_raster[:5] != cache_key:
+            data = self._fetch_tiff(south, north, west, east)
+            if not data:
+                return [0.0] * len(points)
+            self._cached_raster = (*cache_key, data)
+
+        _, _, _, _, _, tiff_data = self._cached_raster
+        try:
+            arr = tifffile.imread(io.BytesIO(tiff_data))
+        except Exception:
+            return [0.0] * len(points)
+
+        if arr.ndim == 3:
+            arr = arr[0]
+
+        rows, cols = arr.shape
+        elevs: list[float] = []
+        for lat, lng in points:
+            # Bilinear interpolation
+            col = (lng - west) / (east - west) * (cols - 1)
+            row = (north - lat) / (north - south) * (rows - 1)
+            elev = self._interp(arr, row, col)
+            elevs.append(float(elev))
+        return elevs
+
+    def _interp(self, arr, r: float, c: float) -> float:
+        r0, c0 = int(r), int(c)
+        r1 = min(r0 + 1, arr.shape[0] - 1)
+        c1 = min(c0 + 1, arr.shape[1] - 1)
+        if r0 < 0 or c0 < 0:
+            return 0.0
+        dr = r - r0
+        dc = c - c0
+        return (
+            arr[r0, c0] * (1 - dr) * (1 - dc) +
+            arr[r0, c1] * (1 - dr) * dc +
+            arr[r1, c0] * dr * (1 - dc) +
+            arr[r1, c1] * dr * dc
+        )
+
+    def _fetch_tiff(self, south: float, north: float, west: float, east: float) -> Optional[bytes]:
         params = urllib.parse.urlencode({
-            "longitude": lng, "latitude": lat,
-            "dataset": self.demtype, "API_Key": self.api_key,
+            "demtype": self.demtype,
+            "south": south, "north": north,
+            "west": west, "east": east,
+            "outputFormat": "GTiff",
+            "API_Key": self.api_key,
         })
         url = f"{self.BASE_URL}?{params}"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Map2Drone/1.0"})
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                data = json.loads(resp.read().decode())
-                return float(data["Elevation"])
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read()
         except Exception:
-            return 0.0
+            return None
 
 
 def create_provider() -> ElevationProvider:
