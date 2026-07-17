@@ -79,11 +79,13 @@ function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
             fontWeight: 600,
             color: '#f1c40f',
             fontFamily: 'Arial, sans-serif',
-            textShadow: '0 0 2px #000, 0 0 2px #000',
+            backgroundColor: 'rgba(0,0,0,0.7)',
+            padding: '0 3px',
+            borderRadius: 2,
             pointerEvents: 'none',
           }}
         >
-          {altitude}m
+          {Math.round(altitude)}m
         </div>
       </div>
     </Marker>
