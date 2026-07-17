@@ -370,9 +370,8 @@ def _terrain_waypoints_from_segments(
             if min_spacing_m > 0 and wps:
                 dx = (lng - wps[-1].longitude) * 111320 * math.cos(math.radians(lat))
                 dy = (lat - wps[-1].latitude) * 111320
-                if math.sqrt(dx * dx + dy * dy) < min_spacing_m:
-                    if j != 0 and j != n - 1:
-                        last_break_elev = elev
+                if j != 0 and j != n - 1 and math.sqrt(dx * dx + dy * dy) < min_spacing_m:
+                    last_break_elev = elev
                     continue
 
             wps.append(WaypointSchema(
