@@ -22,6 +22,8 @@ class ExportWaypoint(BaseModel):
     action_type: int = -1
     action_param: float = 0
     actions: list[Action] = []
+    elevation_msnm: Optional[float] = None
+    agl: Optional[float] = None
 
 
 class HomePoint(BaseModel):

@@ -64,6 +64,8 @@ export function buildExportData(gridResult: GridResult, projectName: string) {
       speed: wp.speed,
       action_type: wp.action_type ?? -1,
       action_param: wp.action_param ?? 0,
+      elevation_msnm: wp.elevation_msnm,
+      agl: wp.agl,
     })),
     home_latitude: gridResult.waypoints?.[0]?.latitude ?? 0,
     home_longitude: gridResult.waypoints?.[0]?.longitude ?? 0,

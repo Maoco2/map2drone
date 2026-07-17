@@ -8,9 +8,15 @@ from .models import MissionExportData
 
 def _altitude_mode(mission: MissionExportData) -> str:
     mode = (mission.altitude_mode or "").lower()
-    if mode in ("absolute", "asl", "sea_level", "msl"):
+    if mode in ("absolute", "asl", "sea_level", "msl", "ground"):
         return "absolute"
     return "relativeToGround"
+
+
+def _wp_alt_msl(wp) -> float:
+    if wp.elevation_msnm is not None and wp.agl is not None:
+        return wp.elevation_msnm + wp.agl
+    return wp.altitude
 
 
 def _build_kml(mission: MissionExportData) -> str:
@@ -35,15 +41,18 @@ def _build_kml(mission: MissionExportData) -> str:
 
     # Home point
     if mission.home:
+        home_alt = mission.altitude
+        if mission.waypoints and mission.waypoints[0].elevation_msnm is not None:
+            home_alt = _wp_alt_msl(mission.waypoints[0])
         hm = ET.SubElement(doc, "Placemark")
         ET.SubElement(hm, "name").text = "Home Point"
         ET.SubElement(hm, "styleUrl").text = "#homeIcon"
-        desc = ET.SubElement(hm, "description")
-        desc.text = f"Altura: {mission.altitude:.1f}m"
+        ed_home = ET.SubElement(hm, "ExtendedData")
+        _add_data(ed_home, "Altura", f"{home_alt:.1f} m MSL")
         pt = ET.SubElement(hm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
         ET.SubElement(pt, "coordinates").text = (
-            f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{mission.altitude:.1f}"
+            f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{home_alt:.1f}"
         )
 
     # Flight route (LineString)
@@ -55,31 +64,50 @@ def _build_kml(mission: MissionExportData) -> str:
         ET.SubElement(ls, "altitudeMode").text = alt_mode
         coords = ET.SubElement(ls, "coordinates")
         coord_pairs = " ".join(
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{wp.altitude:.1f}"
+            f"{wp.longitude:.7f},{wp.latitude:.7f},{_wp_alt_msl(wp):.1f}"
             for wp in mission.waypoints
         )
         coords.text = coord_pairs
 
     # Waypoints
     for i, wp in enumerate(mission.waypoints):
+        msl = _wp_alt_msl(wp)
         pm = ET.SubElement(doc, "Placemark")
         ET.SubElement(pm, "name").text = f"WPT {i + 1}"
         ET.SubElement(pm, "styleUrl").text = "#wpIcon"
+        agl_str = f"AGL: {wp.agl:.0f}m<br/>" if wp.agl is not None else ""
+        elev_str = f"Elevación: {wp.elevation_msnm:.0f}m<br/>" if wp.elevation_msnm is not None else ""
         desc = ET.SubElement(pm, "description")
         desc.text = (
-            f"Altura: {wp.altitude:.1f}m<br/>"
+            f"Altura: {msl:.1f}m MSL<br/>"
+            f"{agl_str}{elev_str}"
             f"Rumbo: {wp.heading:.1f}°<br/>"
             f"Velocidad: {wp.speed or mission.speed_ms:.1f}m/s<br/>"
             f"Acción: {wp.action_type if wp.action_type > 0 else 'Ninguna'}"
         )
+        ed = ET.SubElement(pm, "ExtendedData")
+        _add_data(ed, "MSL (Altura sobre el mar)", f"{msl:.1f} m")
+        if wp.agl is not None:
+            _add_data(ed, "AGL (Altura sobre terreno)", f"{wp.agl:.0f} m")
+        if wp.elevation_msnm is not None:
+            _add_data(ed, "Elevación del terreno", f"{wp.elevation_msnm:.0f} m")
+        _add_data(ed, "Rumbo", f"{wp.heading:.1f}°")
+        _add_data(ed, "Velocidad", f"{wp.speed or mission.speed_ms:.1f} m/s")
+        if wp.action_type and wp.action_type > 0:
+            _add_data(ed, "Acción", str(wp.action_type))
         pt = ET.SubElement(pm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
         ET.SubElement(pt, "coordinates").text = (
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{wp.altitude:.1f}"
+            f"{wp.longitude:.7f},{wp.latitude:.7f},{msl:.1f}"
         )
 
     raw = ET.tostring(root, encoding="unicode")
     return minidom.parseString(raw).toprettyxml(indent="  ")
+
+
+def _add_data(parent: ET.Element, name: str, value: str) -> None:
+    d = ET.SubElement(parent, "Data", name=name)
+    ET.SubElement(d, "value").text = value
 
 
 def _add_style(parent: ET.Element, style_id: str, color: str, scale: str) -> None:

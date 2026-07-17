@@ -118,6 +118,8 @@ export interface ExportWaypoint {
   gimbal_pitch?: number;
   action_type?: number;
   action_param?: number;
+  elevation_msnm?: number;
+  agl?: number;
 }
 
 export interface User {

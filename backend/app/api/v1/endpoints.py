@@ -297,6 +297,7 @@ def export_multi(req: MultiExportRequest):
                     speed=wp.speed, curve_size=wp.curve_size,
                     gimbal_pitch=wp.gimbal_pitch,
                     action_type=wp.action_type, action_param=wp.action_param,
+                    elevation_msnm=wp.elevation_msnm, agl=wp.agl,
                 )
                 for wp in req.waypoints
             ]
@@ -355,6 +356,8 @@ def export_mission(fmt: str, req: ExportRequest):
             gimbal_pitch=wp.gimbal_pitch,
             action_type=wp.action_type,
             action_param=wp.action_param,
+            elevation_msnm=wp.elevation_msnm,
+            agl=wp.agl,
         )
         for wp in req.waypoints
     ]
