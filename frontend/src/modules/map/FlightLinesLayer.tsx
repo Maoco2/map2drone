@@ -1,4 +1,4 @@
-import { Source, Layer } from 'react-map-gl/maplibre';
+import { Source, Layer, Marker } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import { useMissionStore } from '@/modules/missions/planningStore';
 import { useMemo } from 'react';
@@ -26,55 +26,6 @@ const giroLineLayer: LayerProps = {
   },
 };
 
-const waypointCircleLayer: LayerProps = {
-  id: 'flight-waypoints-circle',
-  type: 'circle',
-  filter: ['==', ['get', 'type'], 'waypoint'],
-  paint: {
-    'circle-radius': ['case', ['>=', ['get', 'index'], 100], 14, 11],
-    'circle-color': '#1a5276',
-    'circle-stroke-width': 1.5,
-    'circle-stroke-color': '#ffffff',
-  },
-};
-
-const waypointLabelLayer: LayerProps = {
-  id: 'flight-waypoints-label',
-  type: 'symbol',
-  filter: ['==', ['get', 'type'], 'waypoint'],
-  layout: {
-    'text-field': ['to-string', ['get', 'index']],
-    'text-font': ['Noto Sans Bold'],
-    'text-size': 11,
-    'text-anchor': 'center',
-    'text-allow-overlap': true,
-    'text-ignore-placement': true,
-  },
-  paint: {
-    'text-color': '#ffffff',
-  },
-};
-
-const waypointAltLayer: LayerProps = {
-  id: 'flight-waypoints-alt',
-  type: 'symbol',
-  filter: ['==', ['get', 'type'], 'waypoint'],
-  layout: {
-    'text-field': ['concat', ['to-string', ['get', 'altitude']], 'm'],
-    'text-font': ['Noto Sans Regular'],
-    'text-size': 9,
-    'text-anchor': 'top',
-    'text-offset': [0, 1.5],
-    'text-allow-overlap': true,
-    'text-ignore-placement': true,
-  },
-  paint: {
-    'text-color': '#f1c40f',
-    'text-halo-color': '#000000',
-    'text-halo-width': 2,
-  },
-};
-
 const photoTriggerLayer: LayerProps = {
   id: 'flight-photo-triggers',
   type: 'circle',
@@ -86,6 +37,59 @@ const photoTriggerLayer: LayerProps = {
   },
 };
 
+function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
+  const coords = (feature.geometry as GeoJSON.Point).coordinates;
+  const props = feature.properties as Record<string, any>;
+  const index = props.index;
+  const altitude = props.altitude;
+  const radius = index >= 100 ? 14 : 11;
+
+  return (
+    <Marker longitude={coords[0]} latitude={coords[1]}>
+      <div style={{ position: 'relative', width: 0, height: 0 }}>
+        <div
+          style={{
+            position: 'absolute',
+            left: -radius,
+            top: -radius,
+            width: radius * 2,
+            height: radius * 2,
+            borderRadius: '50%',
+            backgroundColor: '#1a5276',
+            border: '1.5px solid #ffffff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 11,
+            fontWeight: 700,
+            color: '#ffffff',
+            fontFamily: 'Arial, sans-serif',
+          }}
+        >
+          {index}
+        </div>
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: radius + 2,
+            transform: 'translateX(-50%)',
+            whiteSpace: 'nowrap',
+            fontSize: 9,
+            fontWeight: 600,
+            color: '#f1c40f',
+            fontFamily: 'Arial, sans-serif',
+            textShadow: '0 0 2px #000, 0 0 2px #000',
+            pointerEvents: 'none',
+          }}
+        >
+          {altitude}m
+        </div>
+      </div>
+    </Marker>
+  );
+}
+
 export default function FlightLinesLayer() {
   const geoJSON = useMissionStore((s) => s.flightLinesGeoJSON);
 
@@ -94,16 +98,23 @@ export default function FlightLinesLayer() {
     return geoJSON;
   }, [geoJSON]);
 
+  const waypointFeatures = useMemo(() => {
+    if (!geoJSON) return [];
+    return geoJSON.features.filter((f) => f.properties?.type === 'waypoint');
+  }, [geoJSON]);
+
   if (!geoJSON) return null;
 
   return (
-    <Source id="flight-lines" type="geojson" data={data}>
-      <Layer {...scanLineLayer} />
-      <Layer {...giroLineLayer} />
-      <Layer {...waypointCircleLayer} />
-      <Layer {...waypointLabelLayer} />
-      <Layer {...waypointAltLayer} />
-      <Layer {...photoTriggerLayer} />
-    </Source>
+    <>
+      <Source id="flight-lines" type="geojson" data={data}>
+        <Layer {...scanLineLayer} />
+        <Layer {...giroLineLayer} />
+        <Layer {...photoTriggerLayer} />
+      </Source>
+      {waypointFeatures.map((f) => (
+        <WaypointMarker key={f.id} feature={f} />
+      ))}
+    </>
   );
 }
