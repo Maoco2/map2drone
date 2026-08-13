@@ -2,7 +2,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    gis_warnings,
+)
 from .models import MissionExportData
 
 
@@ -93,6 +97,17 @@ class GeoJsonExporter(MissionExporter):
     extension = ".geojson"
     version = "1.0"
     description = "GeoJSON FeatureCollection con waypoints, ruta y metadatos"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.GIS_ONLY,
+        description=(
+            "GeoJSON (RFC 7946) es un estándar GIS que representa geometría para "
+            "sistemas de información geográfica. NO constituye una misión de vuelo "
+            "ejecutable por ningún dron."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        return gis_warnings(mission)
 
     def export(self, mission: MissionExportData) -> ExportResult:
         geojson = _build_geojson(mission)

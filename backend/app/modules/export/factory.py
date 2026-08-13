@@ -24,11 +24,14 @@ def list_exporters() -> list[dict]:
     result = []
     for name, cls in _registry.items():
         inst = get_exporter(name)
-        result.append({
+        item = {
             "id": name,
             "name": inst.name,
             "extension": inst.extension,
             "version": inst.version,
             "description": inst.description,
-        })
+        }
+        if inst.compatibility is not None:
+            item["compatibility"] = inst.compatibility.model_dump(mode="json")
+        result.append(item)
     return result

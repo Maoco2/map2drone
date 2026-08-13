@@ -1,5 +1,10 @@
 from .factory import register, get_exporter, list_exporters
-from .base import MissionExporter, ExportResult, ValidationResult, ValidationError
+from .base import (
+    MissionExporter, ExportResult, ValidationResult, ValidationError,
+    CompatibilityCategory, CompatibilityInfo, ExportWarning,
+    has_elevation_data, has_gimbal, has_curve, has_multiple_actions,
+    has_heading_per_wp, has_terrain_following, gis_warnings,
+)
 from .models import MissionExportData, ExportWaypoint, HomePoint, DroneInfo, CameraInfo, Action
 
 from .litchi import LitchiExporter
@@ -28,5 +33,8 @@ register("gpx", GpxExporter)
 __all__ = [
     "register", "get_exporter", "list_exporters",
     "MissionExporter", "ExportResult", "ValidationResult", "ValidationError",
+    "CompatibilityCategory", "CompatibilityInfo", "ExportWarning",
+    "has_elevation_data", "has_gimbal", "has_curve", "has_multiple_actions",
+    "has_heading_per_wp", "has_terrain_following", "gis_warnings",
     "MissionExportData", "ExportWaypoint", "HomePoint", "DroneInfo", "CameraInfo", "Action",
 ]

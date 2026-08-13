@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExportFormat, ExportWaypoint, GridResult } from '@/shared/types/project';
+import type { ExportFormat, ExportFormatCheckItem, ExportWaypoint, GridResult } from '@/shared/types/project';
 
 interface ExportState {
   formats: ExportFormat[];
@@ -8,8 +8,10 @@ interface ExportState {
   status: 'idle' | 'exporting' | 'done' | 'error';
   progress: number;
   error: string | null;
+  checks: Record<string, ExportFormatCheckItem>;
 
   setFormats: (fmts: ExportFormat[]) => void;
+  setChecks: (items: ExportFormatCheckItem[]) => void;
   toggleFormat: (id: string) => void;
   selectAll: () => void;
   deselectAll: () => void;
@@ -27,8 +29,14 @@ export const useExportStore = create<ExportState>((set, get) => ({
   status: 'idle',
   progress: 0,
   error: null,
+  checks: {},
 
   setFormats: (formats) => set({ formats }),
+  setChecks: (items) => {
+    const checks: Record<string, ExportFormatCheckItem> = {};
+    for (const item of items) checks[item.id] = item;
+    set({ checks });
+  },
   toggleFormat: (id) => {
     const curr = get().selectedFormats;
     if (curr.includes(id)) {
@@ -50,8 +58,17 @@ export const useExportStore = create<ExportState>((set, get) => ({
     status: 'idle',
     progress: 0,
     error: null,
+    checks: {},
   }),
 }));
+
+export const COMPAT_COLORS: Record<string, string> = {
+  official: '#00c853',
+  importable_limited: '#4f8cff',
+  proprietary: '#ff9100',
+  reverse_engineered: '#e53935',
+  gis_only: '#9e9e9e',
+};
 
 export function buildExportData(gridResult: GridResult, projectName: string) {
   return {

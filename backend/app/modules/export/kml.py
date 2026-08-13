@@ -2,7 +2,11 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    gis_warnings,
+)
 from .models import MissionExportData
 
 
@@ -123,6 +127,17 @@ class KmlExporter(MissionExporter):
     extension = ".kml"
     version = "2.2"
     description = "Keyhole Markup Language para Google Earth"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.GIS_ONLY,
+        description=(
+            "KML es un estándar oficial (OGC/Google) que representa geometría para "
+            "visualización GIS (Google Earth). NO constituye una misión de vuelo "
+            "ejecutable por ningún dron."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        return gis_warnings(mission)
 
     def export(self, mission: MissionExportData) -> ExportResult:
         kml = _build_kml(mission)

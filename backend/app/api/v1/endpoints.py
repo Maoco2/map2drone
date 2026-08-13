@@ -262,82 +262,10 @@ from app.modules.export import (
     get_exporter, list_exporters,
     MissionExportData, ExportWaypoint, HomePoint, DroneInfo, CameraInfo, Action,
 )
-from app.schemas.schemas import ExportFormatItem, ExportRequest, MultiExportRequest
+from app.schemas.schemas import ExportFormatItem, ExportFormatCheckItem, ExportRequest, MultiExportRequest
 
 
-@router.get("/export/formats", response_model=list[ExportFormatItem])
-def get_export_formats():
-    return list_exporters()
-
-
-@router.post("/export/multi")
-def export_multi(req: MultiExportRequest):
-    import io, zipfile
-    from datetime import datetime
-
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for fmt in req.formats:
-            try:
-                exporter = get_exporter(fmt)
-            except ValueError:
-                continue
-
-            home = None
-            if req.home_latitude is not None and req.home_longitude is not None:
-                home = HomePoint(latitude=req.home_latitude, longitude=req.home_longitude)
-
-            drone = DroneInfo(name=req.drone_name) if req.drone_name else None
-            camera = CameraInfo(name=req.camera_name) if req.camera_name else None
-
-            waypoints = [
-                ExportWaypoint(
-                    latitude=wp.latitude, longitude=wp.longitude,
-                    altitude=wp.altitude, heading=wp.heading,
-                    speed=wp.speed, curve_size=wp.curve_size,
-                    gimbal_pitch=wp.gimbal_pitch,
-                    action_type=wp.action_type, action_param=wp.action_param,
-                    elevation_msnm=wp.elevation_msnm, agl=wp.agl,
-                )
-                for wp in req.waypoints
-            ]
-
-            mission = MissionExportData(
-                project_name=req.project_name,
-                waypoints=waypoints, home=home, drone=drone, camera=camera,
-                speed_ms=req.speed, altitude=req.altitude,
-    altitude_mode=req.altitude_mode,
-    waypoint_mode={"takeoff": "vertex", "ground": "terrain"}.get(req.altitude_mode, "photo"),
-    total_distance_m=req.total_distance,
-    estimated_time_s=req.estimated_time,
-    photo_count=req.photo_count, area_ha=req.area_ha,
-    gsd_cm=req.gsd, sweep_deg=req.sweep_deg,
-    line_spacing=req.line_spacing, photo_spacing=req.photo_spacing,
-    overlap_frontal=req.overlap_frontal,
-    overlap_lateral=req.overlap_lateral,
-    battery_count=req.battery_count,
-)
-
-            result = exporter.export(mission)
-            data_bytes = result.data if isinstance(result.data, bytes) else result.data.encode("utf-8")
-            zf.writestr(result.filename, data_bytes)
-
-    zip_data = buf.getvalue()
-    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    return Response(
-        content=zip_data,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{req.project_name}_{ts}.zip"'},
-    )
-
-
-@router.post("/export/{fmt}")
-def export_mission(fmt: str, req: ExportRequest):
-    try:
-        exporter = get_exporter(fmt)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
+def _build_mission(req: ExportRequest | MultiExportRequest) -> MissionExportData:
     home = None
     if req.home_latitude is not None and req.home_longitude is not None:
         home = HomePoint(latitude=req.home_latitude, longitude=req.home_longitude)
@@ -362,7 +290,7 @@ def export_mission(fmt: str, req: ExportRequest):
         for wp in req.waypoints
     ]
 
-    mission = MissionExportData(
+    return MissionExportData(
         project_name=req.project_name,
         waypoints=waypoints,
         home=home,
@@ -384,6 +312,71 @@ def export_mission(fmt: str, req: ExportRequest):
         overlap_lateral=req.overlap_lateral,
         battery_count=req.battery_count,
     )
+
+
+@router.get("/export/formats", response_model=list[ExportFormatItem])
+def get_export_formats():
+    return list_exporters()
+
+
+@router.post("/export/check", response_model=list[ExportFormatCheckItem])
+def check_export_formats(req: MultiExportRequest):
+    mission = _build_mission(req)
+    results = []
+    for fmt in req.formats:
+        try:
+            exporter = get_exporter(fmt)
+        except ValueError:
+            continue
+        results.append({
+            "id": fmt,
+            "name": exporter.name,
+            "extension": exporter.extension,
+            "compatibility": (
+                exporter.compatibility.model_dump(mode="json")
+                if exporter.compatibility is not None else None
+            ),
+            "warnings": [w.model_dump(mode="json") for w in exporter.get_warnings(mission)],
+        })
+    return results
+
+
+@router.post("/export/multi")
+def export_multi(req: MultiExportRequest):
+    import io, zipfile
+    from datetime import datetime
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for fmt in req.formats:
+            try:
+                exporter = get_exporter(fmt)
+            except ValueError:
+                continue
+
+            mission = _build_mission(req)
+
+            result = exporter.export(mission)
+            data_bytes = result.data if isinstance(result.data, bytes) else result.data.encode("utf-8")
+            zf.writestr(result.filename, data_bytes)
+
+    zip_data = buf.getvalue()
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return Response(
+        content=zip_data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{req.project_name}_{ts}.zip"'},
+    )
+
+
+@router.post("/export/{fmt}")
+def export_mission(fmt: str, req: ExportRequest):
+    try:
+        exporter = get_exporter(fmt)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    mission = _build_mission(req)
 
     validation = exporter.validate(mission)
     if not validation.valid:

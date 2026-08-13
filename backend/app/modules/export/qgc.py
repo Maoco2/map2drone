@@ -2,7 +2,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    has_multiple_actions, has_gimbal, has_terrain_following, has_heading_per_wp,
+)
 from .models import MissionExportData
 
 
@@ -135,6 +139,42 @@ class QgcExporter(MissionExporter):
     extension = ".plan"
     version = "2.0"
     description = "Plan JSON compatible con QGroundControl"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.OFFICIAL,
+        description=(
+            "El formato .plan está documentado oficialmente por QGroundControl "
+            "(proyecto open source). Se importa directamente en QGroundControl. "
+            "El comportamiento real depende del firmware del autopiloto (ArduPilot/PX4)."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        warnings: list[ExportWarning] = []
+        if has_gimbal(mission):
+            warnings.append(ExportWarning(
+                code="gimbal_lost",
+                message="El plan QGC no representa pitch/modo de gimbal por waypoint.",
+                fields=["gimbal_pitch", "gimbal_mode"],
+            ))
+        if has_multiple_actions(mission):
+            warnings.append(ExportWarning(
+                code="actions_approximated",
+                message=(
+                    "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
+                    "al inicio/fin de cada scanline; las acciones exactas por waypoint "
+                    "no se transfieren."
+                ),
+                fields=["actions", "action_type", "action_param"],
+            ))
+        if has_terrain_following(mission):
+            warnings.append(ExportWarning(
+                code="terrain_following_lost",
+                message="El plan no activa seguimiento de terreno; se exportan alturas fijas.",
+                fields=["terrain_following"],
+            ))
+        if not has_heading_per_wp(mission):
+            pass
+        return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:
         plan = _build_plan(mission)

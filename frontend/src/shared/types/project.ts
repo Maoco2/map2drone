@@ -100,12 +100,33 @@ export interface GridResult {
   waypoint_mode?: 'photo' | 'vertex' | 'terrain';
 }
 
+export interface ExportCompatibility {
+  category: string;
+  label: string;
+  description: string;
+}
+
+export interface ExportWarning {
+  code: string;
+  message: string;
+  fields: string[];
+}
+
 export interface ExportFormat {
   id: string;
   name: string;
   extension: string;
   version: string;
   description: string;
+  compatibility?: ExportCompatibility;
+}
+
+export interface ExportFormatCheckItem {
+  id: string;
+  name: string;
+  extension: string;
+  compatibility?: ExportCompatibility;
+  warnings: ExportWarning[];
 }
 
 export interface ExportWaypoint {

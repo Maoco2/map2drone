@@ -2,7 +2,11 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    gis_warnings,
+)
 from .models import MissionExportData
 
 GPX_NS = "http://www.topografix.com/GPX/1/1"
@@ -73,6 +77,16 @@ class GpxExporter(MissionExporter):
     extension = ".gpx"
     version = "1.1"
     description = "GPX con track, segmentos, waypoints y metadatos"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.GIS_ONLY,
+        description=(
+            "GPX (estándar Topografix) representa tracks y waypoints para aplicaciones "
+            "de navegación/GIS. NO constituye una misión de vuelo ejecutable por ningún dron."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        return gis_warnings(mission)
 
     def export(self, mission: MissionExportData) -> ExportResult:
         gpx = _build_gpx(mission)

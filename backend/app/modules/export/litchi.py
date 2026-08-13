@@ -1,7 +1,11 @@
 from __future__ import annotations
 from typing import Sequence
 
-from .base import MissionExporter, ExportResult, ValidationResult, ValidationError
+from .base import (
+    MissionExporter, ExportResult, ValidationResult, ValidationError,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    has_elevation_data, has_terrain_following,
+)
 from .models import MissionExportData, ExportWaypoint
 
 CSV_HEADER = (
@@ -86,6 +90,15 @@ class LitchiExporter(MissionExporter):
     extension = ".csv"
     version = "1.0"
     description = "CSV compatible con Litchi Mission Hub"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.PROPRIETARY,
+        description=(
+            "Formato CSV propietario de Litchi. El fabricante publica la especificación "
+            "para herramientas de terceros y se importa en la app Litchi Mission Hub "
+            "(requiere licencia de pago de la app). No hay garantía de que versiones "
+            "futuras de la app mantengan compatibilidad."
+        ),
+    )
 
     def validate(self, mission: MissionExportData) -> ValidationResult:
         errors: list[ValidationError] = []
@@ -97,6 +110,36 @@ class LitchiExporter(MissionExporter):
                 message=f"Litchi soporta máximo {limit} waypoints por misión (se tienen {len(mission.waypoints)})"
             ))
         return ValidationResult(valid=len(errors) == 0, errors=errors)
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        warnings: list[ExportWarning] = []
+        for i, wp in enumerate(mission.waypoints):
+            if len(wp.actions) + 1 > 15:
+                warnings.append(ExportWarning(
+                    code="actions_truncated",
+                    message=(
+                        f"El waypoint {i + 1} tiene {len(wp.actions) + 1} acciones, "
+                        "pero el CSV de Litchi solo soporta 15 slots. Las restantes se descartan."
+                    ),
+                    fields=["actions"],
+                ))
+                break
+        if has_elevation_data(mission):
+            warnings.append(ExportWarning(
+                code="elevation_lost",
+                message=(
+                    "Litchi CSV no representa la elevación del terreno (MSL/AGL); "
+                    "las alturas se exportan como valores del modelo."
+                ),
+                fields=["elevation_msnm", "agl"],
+            ))
+        if has_terrain_following(mission):
+            warnings.append(ExportWarning(
+                code="terrain_following_lost",
+                message="Litchi CSV no soporta seguimiento de terreno; la misión se exporta con alturas fijas.",
+                fields=["terrain_following"],
+            ))
+        return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:
         csv = generate_litchi_csv(

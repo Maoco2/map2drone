@@ -1,7 +1,11 @@
 from __future__ import annotations
 from typing import Any
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    has_multiple_actions, has_gimbal, has_terrain_following,
+)
 from .models import MissionExportData
 
 
@@ -101,6 +105,40 @@ class MissionPlannerExporter(MissionExporter):
     extension = ".waypoints"
     version = "1.0"
     description = "Formato waypoints compatible con Mission Planner / ArduPilot"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.OFFICIAL,
+        description=(
+            "El formato de archivo de waypoints (QGC WPL 110) está documentado por "
+            "ArduPilot. Se importa en Mission Planner y otros planificadores de misión "
+            "de ArduPilot."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        warnings: list[ExportWarning] = []
+        if has_gimbal(mission):
+            warnings.append(ExportWarning(
+                code="gimbal_lost",
+                message="El formato no representa pitch/modo de gimbal por waypoint.",
+                fields=["gimbal_pitch", "gimbal_mode"],
+            ))
+        if has_multiple_actions(mission):
+            warnings.append(ExportWarning(
+                code="actions_approximated",
+                message=(
+                    "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
+                    "al inicio/fin de cada scanline; las acciones exactas por waypoint "
+                    "no se transfieren."
+                ),
+                fields=["actions", "action_type", "action_param"],
+            ))
+        if has_terrain_following(mission):
+            warnings.append(ExportWarning(
+                code="terrain_following_lost",
+                message="El archivo no activa seguimiento de terreno; se exportan alturas fijas.",
+                fields=["terrain_following"],
+            ))
+        return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:
         content = _build_waypoints(mission)

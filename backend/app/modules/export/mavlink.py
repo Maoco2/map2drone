@@ -3,7 +3,11 @@ import json
 import struct
 from typing import Any
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    has_gimbal, has_multiple_actions,
+)
 from .models import MissionExportData
 
 
@@ -91,11 +95,47 @@ def _pack_item(seq: int, frame: int, cmd: int,
     return payload
 
 
+def _frame_warning() -> ExportWarning:
+    return ExportWarning(
+        code="no_mavlink_framing",
+        message=(
+            "Este archivo NO es un stream MAVLink v2 completo: contiene solo los payloads de "
+            "MISSION_ITEM_INT sin el framing del protocolo (byte de magic, lengths, checksum "
+            "CRC y firma). No puede cargarse directamente en QGroundControl ni en un autopiloto."
+        ),
+        fields=[],
+    )
+
+
 class MavlinkExporter(MissionExporter):
     name = "MAVLink Mission"
     extension = ".mavlink"
     version = "2.0"
     description = "Misión en formato MAVLink (JSON + binario)"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.REVERSE_ENGINEERED,
+        description=(
+            "MAVLink es un protocolo abierto y documentado, pero esta representación "
+            "JSON de MISSION_ITEM_INT es propia del proyecto y no es un archivo de "
+            "misión estándar: no es importable directamente por estaciones de tierra."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        warnings = [_frame_warning()]
+        if has_gimbal(mission):
+            warnings.append(ExportWarning(
+                code="gimbal_lost",
+                message="El pitch/modo de gimbal no se representa en MISSION_ITEM_INT.",
+                fields=["gimbal_pitch", "gimbal_mode"],
+            ))
+        if has_multiple_actions(mission):
+            warnings.append(ExportWarning(
+                code="actions_approximated",
+                message="Las acciones por waypoint se reducen a param5/param6 del comando 16.",
+                fields=["actions"],
+            ))
+        return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:
         json_data = _build_mavlink_json(mission)
@@ -111,6 +151,17 @@ class MavlinkBinaryExporter(MissionExporter):
     extension = ".bin"
     version = "2.0"
     description = "Misión en formato MAVLink binario (.mavlink)"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.REVERSE_ENGINEERED,
+        description=(
+            "El binario contiene payloads MISSION_ITEM_INT sin framing ni checksum "
+            "MAVLink v2. No es un archivo .mavlink válido para QGroundControl ni "
+            "para autopilotos; solo sirve como referencia o para software propio."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        return [_frame_warning()]
 
     def export(self, mission: MissionExportData) -> ExportResult:
         binary = _build_mavlink_binary(mission)

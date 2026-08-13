@@ -4,7 +4,11 @@ import zipfile
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-from .base import MissionExporter, ExportResult, ValidationResult
+from .base import (
+    MissionExporter, ExportResult, ValidationResult,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    gis_warnings,
+)
 from .models import MissionExportData
 
 
@@ -145,6 +149,17 @@ class KmzExporter(MissionExporter):
     extension = ".kmz"
     version = "2.2"
     description = "KMZ comprimido para Google Earth con iconos personalizados"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.GIS_ONLY,
+        description=(
+            "KMZ es un estándar oficial (OGC/Google) que representa geometría para "
+            "visualización GIS (Google Earth). NO constituye una misión de vuelo "
+            "ejecutable por ningún dron."
+        ),
+    )
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        return gis_warnings(mission)
 
     def export(self, mission: MissionExportData) -> ExportResult:
         kmz = _build_kmz(mission)

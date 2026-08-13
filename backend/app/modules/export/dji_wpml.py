@@ -2,7 +2,11 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
-from .base import MissionExporter, ExportResult, ValidationResult, ValidationError
+from .base import (
+    MissionExporter, ExportResult, ValidationResult, ValidationError,
+    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    has_elevation_data, has_heading_per_wp, has_multiple_actions, has_gimbal,
+)
 from .models import MissionExportData
 
 
@@ -117,6 +121,15 @@ class DjiWpmlExporter(MissionExporter):
     extension = ".wpml"
     version = "2.0"
     description = "Waypoint Markup Language compatible con DJI Pilot 2"
+    compatibility = CompatibilityInfo(
+        category=CompatibilityCategory.REVERSE_ENGINEERED,
+        description=(
+            "WPML es un formato de DJI cuya especificación completa no es pública. "
+            "Este archivo se construye a partir de la estructura reconstruida por la "
+            "comunidad; DJI puede cambiar o rechazar el formato sin previo aviso. "
+            "Comprobar la importación en la versión exacta de DJI Pilot 2 antes de volar."
+        ),
+    )
 
     def validate(self, mission: MissionExportData) -> ValidationResult:
         errors: list[ValidationError] = []
@@ -131,6 +144,43 @@ class DjiWpmlExporter(MissionExporter):
                 message="Se requiere un Home Point válido para DJI WPML"
             ))
         return ValidationResult(valid=len(errors) == 0, errors=errors)
+
+    def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
+        warnings: list[ExportWarning] = []
+        if has_elevation_data(mission):
+            warnings.append(ExportWarning(
+                code="elevation_lost",
+                message=(
+                    "WPML no representa la elevación del terreno (MSL/AGL); "
+                    "las alturas se exportan como valores del modelo."
+                ),
+                fields=["elevation_msnm", "agl"],
+            ))
+        if has_heading_per_wp(mission):
+            warnings.append(ExportWarning(
+                code="heading_ignored",
+                message=(
+                    "El archivo usa headingMode=auto; el rumbo definido por waypoint "
+                    "no controla la orientación del dron."
+                ),
+                fields=["heading"],
+            ))
+        if has_multiple_actions(mission):
+            warnings.append(ExportWarning(
+                code="actions_approximated",
+                message=(
+                    "Las acciones múltiples por waypoint se simplifican; WPML usa "
+                    "disparo por intervalo estimado (reachPoint) en modo de línea."
+                ),
+                fields=["actions"],
+            ))
+        if has_gimbal(mission):
+            warnings.append(ExportWarning(
+                code="gimbal_approximated",
+                message="El pitch/modo del gimbal no se transfiere de forma fiel en este exportador.",
+                fields=["gimbal_pitch", "gimbal_mode"],
+            ))
+        return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:
         xml = _build_xml(mission)

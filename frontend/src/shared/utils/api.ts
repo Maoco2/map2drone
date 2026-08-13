@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { Project, Mission, Drone, Camera, GridResult, TokenResponse, User, ExportFormat } from '@/shared/types/project';
+import type { Project, Mission, Drone, Camera, GridResult, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
 
 const API_BASE = '/api/v1';
 
@@ -132,6 +132,12 @@ export const api = {
   export: {
     listFormats: () =>
       fetchJson<ExportFormat[]>('/export/formats'),
+
+    check: (data: any) =>
+      fetchJson<ExportFormatCheckItem[]>('/export/check', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
 
     format: (fmt: string, data: any) =>
       fetchBlob(`/export/${fmt}`, {

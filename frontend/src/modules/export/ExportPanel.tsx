@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import { api } from '@/shared/utils/api';
-import { useExportStore, buildExportData } from './exportStore';
+import { useExportStore, buildExportData, COMPAT_COLORS } from './exportStore';
 import { useMissionStore } from '@/modules/missions/planningStore';
 import type { Drone } from '@/shared/types/project';
 
@@ -15,8 +15,8 @@ function downloadBlob(blob: Blob, filename: string) {
 
 export default function ExportPanel() {
   const {
-    formats, selectedFormats, projectName, status, progress, error,
-    setFormats, toggleFormat, selectAll, deselectAll,
+    formats, selectedFormats, projectName, status, progress, error, checks,
+    setFormats, setChecks, toggleFormat, selectAll, deselectAll,
     setProjectName, setStatus, setProgress, setError, reset,
   } = useExportStore();
   const gridResult = useMissionStore((s) => s.gridResult);
@@ -27,6 +27,36 @@ export default function ExportPanel() {
 
   const dronesRef = useRef<Drone[] | null>(null);
 
+  const buildPayload = useCallback(async () => {
+    if (!gridResult) return null;
+    if (!dronesRef.current) {
+      try {
+        dronesRef.current = await api.drones.list();
+      } catch {
+        dronesRef.current = [];
+      }
+    }
+    const droneId = useMissionStore.getState().droneId;
+    const drone = dronesRef.current.find((d) => d.id === droneId);
+    return {
+      ...buildExportData(gridResult, projectName),
+      altitude_mode: useMissionStore.getState().altitudeMode,
+      drone_name: drone?.name ?? droneId,
+    };
+  }, [gridResult, projectName]);
+
+  useEffect(() => {
+    if (!gridResult || selectedFormats.length === 0) return;
+    let cancelled = false;
+    buildPayload().then((p) => {
+      if (cancelled || !p) return;
+      return api.export.check({ ...p, formats: selectedFormats });
+    }).then((items) => {
+      if (!cancelled && items) setChecks(items);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [gridResult, selectedFormats, projectName, buildPayload, setChecks]);
+
   const handleExport = useCallback(async () => {
     if (!gridResult || selectedFormats.length === 0) return;
     setStatus('exporting');
@@ -34,17 +64,8 @@ export default function ExportPanel() {
     setError(null);
 
     try {
-      if (!dronesRef.current) {
-        dronesRef.current = await api.drones.list();
-      }
-      const droneId = useMissionStore.getState().droneId;
-      const drone = dronesRef.current.find((d) => d.id === droneId);
-
-      const data = {
-        ...buildExportData(gridResult, projectName),
-        altitude_mode: useMissionStore.getState().altitudeMode,
-        drone_name: drone?.name ?? droneId,
-      };
+      const data = await buildPayload();
+      if (!data) throw new Error('No mission data');
 
       if (selectedFormats.length === 1) {
         const blob = await api.export.format(selectedFormats[0], data);
@@ -61,7 +82,7 @@ export default function ExportPanel() {
       setError(err.message || 'Export failed');
       setStatus('error');
     }
-  }, [gridResult, selectedFormats, projectName, formats, setStatus, setProgress, setError]);
+  }, [gridResult, selectedFormats, projectName, formats, buildPayload, setStatus, setProgress, setError]);
 
   return (
     <div className="space-y-3 p-3" style={{ color: 'var(--color-text)' }}>
@@ -96,30 +117,77 @@ export default function ExportPanel() {
             <button onClick={deselectAll} className="text-[10px] underline opacity-60 hover:opacity-100">None</button>
           </div>
         </div>
-        <div className="space-y-1 max-h-48 overflow-y-auto">
+        <div className="space-y-1 max-h-60 overflow-y-auto">
           {formats.map((fmt) => {
             const sel = selectedFormats.includes(fmt.id);
+            const compat = fmt.compatibility;
+            const compatColor = compat ? (COMPAT_COLORS[compat.category] || '#9e9e9e') : '#9e9e9e';
+            const check = checks[fmt.id];
+            const warnings = sel && check ? check.warnings : [];
             return (
-              <button
+              <div
                 key={fmt.id}
-                onClick={() => toggleFormat(fmt.id)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left border transition-colors"
+                className="w-full rounded text-xs text-left border transition-colors"
                 style={{
                   backgroundColor: sel ? 'var(--color-surface)' : 'transparent',
                   borderColor: sel ? '#4f8cff' : 'var(--color-border)',
                   color: 'var(--color-text)',
                 }}
               >
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: sel ? '#4f8cff' : 'transparent', border: '1px solid var(--color-border)' }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{fmt.name}</div>
-                  <div className="text-[10px] opacity-60 truncate">{fmt.description}</div>
-                </div>
-                <span className="text-[10px] opacity-40 font-mono">{fmt.extension}</span>
-              </button>
+                <button
+                  onClick={() => toggleFormat(fmt.id)}
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-left"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: sel ? '#4f8cff' : 'transparent', border: '1px solid var(--color-border)' }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-medium truncate">{fmt.name}</span>
+                      {compat && (
+                        <span
+                          className="px-1 py-px rounded text-[9px] font-semibold shrink-0"
+                          style={{ color: '#fff', backgroundColor: compatColor }}
+                        >
+                          {compat.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] opacity-60 truncate">{fmt.description}</div>
+                  </div>
+                  <span className="text-[10px] opacity-40 font-mono">{fmt.extension}</span>
+                </button>
+                {sel && compat?.description && (
+                  <div
+                    className="px-2 pb-1 pt-0 text-[10px] leading-snug"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {compat.description}
+                  </div>
+                )}
+                {sel && warnings.length > 0 && (
+                  <div className="px-2 pb-2 space-y-1">
+                    {warnings.map((w, wi) => (
+                      <div
+                        key={`${fmt.id}-${w.code}-${wi}`}
+                        className="flex gap-1.5 text-[10px] leading-snug rounded px-1.5 py-1"
+                        style={{
+                          backgroundColor: w.code === 'not_a_mission' || w.code === 'no_mavlink_framing'
+                            ? 'rgba(229,57,53,0.15)'
+                            : 'rgba(255,145,0,0.15)',
+                          color: w.code === 'not_a_mission' || w.code === 'no_mavlink_framing'
+                            ? '#ff6b6b'
+                            : '#ffb74d',
+                        }}
+                      >
+                        <span className="shrink-0">⚠</span>
+                        <span>{w.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

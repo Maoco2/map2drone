@@ -195,6 +195,15 @@ class ExportFormatItem(BaseModel):
     extension: str
     version: str
     description: str
+    compatibility: Optional[dict] = None
+
+
+class ExportFormatCheckItem(BaseModel):
+    id: str
+    name: str
+    extension: str
+    compatibility: Optional[dict] = None
+    warnings: list[dict] = []
 
 
 class ExportRequest(BaseModel):
