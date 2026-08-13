@@ -37,6 +37,26 @@ const photoTriggerLayer: LayerProps = {
   },
 };
 
+const corridorFillLayer: LayerProps = {
+  id: 'corridor-polygon-fill',
+  type: 'fill',
+  paint: {
+    'fill-color': '#4f8cff',
+    'fill-opacity': 0.08,
+  },
+};
+
+const corridorOutlineLayer: LayerProps = {
+  id: 'corridor-polygon-outline',
+  type: 'line',
+  paint: {
+    'line-color': '#2979ff',
+    'line-width': 1.5,
+    'line-dasharray': [1, 0.5],
+    'line-opacity': 0.7,
+  },
+};
+
 function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
   const coords = (feature.geometry as GeoJSON.Point).coordinates;
   const props = feature.properties as Record<string, any>;
@@ -94,6 +114,7 @@ function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
 
 export default function FlightLinesLayer() {
   const geoJSON = useMissionStore((s) => s.flightLinesGeoJSON);
+  const corridorPolygon = useMissionStore((s) => s.corridorPolygon);
 
   const data = useMemo(() => {
     if (!geoJSON) return { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
@@ -109,6 +130,12 @@ export default function FlightLinesLayer() {
 
   return (
     <>
+      {corridorPolygon && (
+        <Source id="corridor-polygon" type="geojson" data={corridorPolygon}>
+          <Layer {...corridorFillLayer} />
+          <Layer {...corridorOutlineLayer} />
+        </Source>
+      )}
       <Source id="flight-lines" type="geojson" data={data}>
         <Layer {...scanLineLayer} />
         <Layer {...giroLineLayer} />

@@ -8,6 +8,8 @@ python-dotenv
 pydantic>=2.0
 scipy
 shapely
+numpy
+pyproj
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]

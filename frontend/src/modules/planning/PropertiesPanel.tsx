@@ -69,8 +69,10 @@ export default function PropertiesPanel() {
   const {
     droneId, altitude, overlapFrontal, overlapLateral,
     gridResult, generating, error, altitudeMode,
+    missionVariant, widthLeft, widthRight,
     setDroneId, setAltitude, setOverlapFrontal, setOverlapLateral,
     setGridResult, setGenerating, setError, setAltitudeMode,
+    setMissionVariant, setWidthLeft, setWidthRight,
   } = useMissionStore();
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId);
   const fetchMissions = useMissionListStore((s) => s.fetchMissions);
@@ -103,7 +105,7 @@ export default function PropertiesPanel() {
   }, [polygonPoints]);
 
   const handleGenerate = useCallback(async () => {
-    if (!droneId || !lastFeature || !polygonPoints) return;
+    if (!droneId) return;
     const drone = drones?.find((d: Drone) => d.id === droneId);
     if (!drone || !drone.camera_id) {
       setError('Selected drone has no associated camera');
@@ -112,6 +114,36 @@ export default function PropertiesPanel() {
     setGenerating(true);
     setError(null);
     try {
+      if (missionVariant === 'corridor') {
+        const lineFeature = features
+          .filter((f) => f.type === 'line' && f.completed && f.points.length >= 2)
+          .pop();
+        if (!lineFeature) {
+          setError('Draw the corridor centerline first using the Line tool');
+          setGenerating(false);
+          return;
+        }
+        const centerline: GeoJSON.LineString = {
+          type: 'LineString',
+          coordinates: lineFeature.points.map((p) => [p.lng, p.lat]),
+        };
+        const result = await api.planning.corridor({
+          centerline,
+          width_left: Number(widthLeft),
+          width_right: Number(widthRight),
+          altitude: Number(altitude),
+          overlap_frontal: Number(overlapFrontal),
+          overlap_lateral: Number(overlapLateral),
+          drone_id: droneId,
+          project_id: selectedProjectId || undefined,
+          altitude_mode: altitudeMode,
+        });
+        setGridResult(result);
+        fetchMissions();
+        return;
+      }
+
+      if (!lastFeature || !polygonPoints) return;
       const coords = polygonPoints.map((p) => [p.lng, p.lat]);
       coords.push([polygonPoints[0].lng, polygonPoints[0].lat]);
       const polygon: GeoJSON.Polygon = {
@@ -132,11 +164,11 @@ export default function PropertiesPanel() {
       setGridResult(result);
       fetchMissions();
     } catch (err: any) {
-      setError(err.message || 'Grid generation failed');
+      setError(err.message || 'Mission generation failed');
     } finally {
       setGenerating(false);
     }
-  }, [drones, droneId, altitude, overlapFrontal, overlapLateral, lastFeature, polygonPoints, selectedProjectId, gridType, altitudeMode, setGridResult, setGenerating, setError, fetchMissions]);
+  }, [drones, droneId, altitude, overlapFrontal, overlapLateral, lastFeature, polygonPoints, selectedProjectId, gridType, altitudeMode, missionVariant, widthLeft, widthRight, features, setGridResult, setGenerating, setError, fetchMissions]);
 
   const handleOpenExport = useCallback(() => {
     useSidebarStore.getState().setActiveTab('export');
@@ -175,6 +207,42 @@ export default function PropertiesPanel() {
       </div>
 
       <div className="p-3 space-y-3">
+        <div className="space-y-2">
+          <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Mission Type</div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setMissionVariant('grid')}
+              className={`flex-1 py-1.5 text-xs rounded font-medium border transition-colors ${
+                missionVariant === 'grid'
+                  ? 'text-white'
+                  : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: missionVariant === 'grid' ? '#4f8cff' : 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+                color: missionVariant === 'grid' ? '#fff' : 'var(--color-text)',
+              }}
+            >
+              Area Grid
+            </button>
+            <button
+              onClick={() => setMissionVariant('corridor')}
+              className={`flex-1 py-1.5 text-xs rounded font-medium border transition-colors ${
+                missionVariant === 'corridor'
+                  ? 'text-white'
+                  : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: missionVariant === 'corridor' ? '#4f8cff' : 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+                color: missionVariant === 'corridor' ? '#fff' : 'var(--color-text)',
+              }}
+            >
+              Linear Corridor
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-2">
           <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Aeronave</div>
           <select
@@ -220,8 +288,21 @@ export default function PropertiesPanel() {
           {field('Overlap Lateral %', overlapLateral, setOverlapLateral, { min: 30, max: 90, step: 1 })}
         </div>
 
-        <div className="space-y-2">
-          <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Grid Options</div>
+        {missionVariant === 'corridor' && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Corridor Width</div>
+            {field('Width Left (m)', widthLeft, setWidthLeft, { min: 1, max: 10000, step: 1 })}
+            {field('Width Right (m)', widthRight, setWidthRight, { min: 1, max: 10000, step: 1 })}
+            <div className="text-[10px] px-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+              Draw the corridor centerline on the map with the <b>Line</b> tool (📏 icon
+              next to Circle) before generating.
+            </div>
+          </div>
+        )}
+
+        {missionVariant === 'grid' && (
+          <div className="space-y-2">
+            <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Grid Options</div>
           <div className="flex gap-2">
             <button
               onClick={() => setGridType('simple')}
@@ -255,6 +336,7 @@ export default function PropertiesPanel() {
             </button>
           </div>
         </div>
+        )}
 
         <div className="space-y-2">
           <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Altitude Mode</div>
@@ -288,23 +370,34 @@ export default function PropertiesPanel() {
           </div>
         </div>
 
-        <div className="text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-          <div>Polygon: {polygonPoints ? `${polygonPoints.length} vertices` : 'none drawn'}</div>
-          {polygonArea && (
+        {missionVariant === 'corridor' ? (
+          <div className="text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
             <div>
-              Area: <span className="font-mono">{polygonArea.m2.toFixed(0)} m²</span>
-              {' '}(<span className="font-mono">{polygonArea.ha.toFixed(2)} ha</span>)
+              Centerline:{' '}
+              {features.filter((f) => f.type === 'line' && f.completed && f.points.length >= 2).length > 0
+                ? 'drawn'
+                : 'not drawn yet'}
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <div className="text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
+            <div>Polygon: {polygonPoints ? `${polygonPoints.length} vertices` : 'none drawn'}</div>
+            {polygonArea && (
+              <div>
+                Area: <span className="font-mono">{polygonArea.m2.toFixed(0)} m²</span>
+                {' '}(<span className="font-mono">{polygonArea.ha.toFixed(2)} ha</span>)
+              </div>
+            )}
+          </div>
+        )}
 
         <button
           onClick={handleGenerate}
-          disabled={generating || !lastFeature || !droneId}
+          disabled={generating || (missionVariant === 'corridor' ? !droneId : (!lastFeature || !droneId))}
           className="w-full py-2 text-xs rounded font-medium text-white transition-opacity disabled:opacity-40 hover:opacity-90"
           style={{ backgroundColor: '#4f8cff' }}
         >
-          {generating ? 'Generating...' : `Generate ${gridType === 'cross' ? 'Cross ' : ''}Grid`}
+          {generating ? 'Generating...' : missionVariant === 'corridor' ? 'Generate Corridor' : `Generate ${gridType === 'cross' ? 'Cross ' : ''}Grid`}
         </button>
 
         {error && (
@@ -321,13 +414,32 @@ export default function PropertiesPanel() {
               <div className="flex justify-between"><span>Footprint:</span><span className="font-mono">{gridResult.footprint_width.toFixed(1)} x {gridResult.footprint_height.toFixed(1)} m</span></div>
               <div className="flex justify-between"><span>Line spacing:</span><span className="font-mono">{gridResult.line_spacing.toFixed(1)} m</span></div>
               <div className="flex justify-between"><span>Photo spacing:</span><span className="font-mono">{gridResult.photo_spacing.toFixed(1)} m</span></div>
+              {gridResult.corridor_length_m != null && (
+                <div className="flex justify-between"><span>Corridor length:</span><span className="font-mono">{gridResult.corridor_length_m.toFixed(0)} m</span></div>
+              )}
+              {gridResult.corridor_area_m2 != null && (
+                <div className="flex justify-between"><span>Corridor area:</span><span className="font-mono">{gridResult.corridor_area_m2.toFixed(0)} m²</span></div>
+              )}
               <div className="flex justify-between"><span>Distance:</span><span className="font-mono">{gridResult.total_distance.toFixed(0)} m</span></div>
               <div className="flex justify-between"><span>Photos:</span><span className="font-mono">{gridResult.photo_count}</span></div>
               <div className="flex justify-between"><span>Speed:</span><span className="font-mono">{gridResult.recommended_speed_ms?.toFixed(1)} m/s</span></div>
               <div className="flex justify-between"><span>Time:</span><span className="font-mono">{Math.round(gridResult.estimated_time_sec / 60)} min</span></div>
               <div className="flex justify-between"><span>Batteries:</span><span className="font-mono">{gridResult.battery_count}</span></div>
               <div className="flex justify-between"><span>Waypoints:</span><span className="font-mono">{gridResult.waypoints.length}</span></div>
+              {gridResult.geometry && (
+                <div className="text-[10px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  CRS: {gridResult.geometry.crs_name} (EPSG:{gridResult.geometry.epsg_out})
+                </div>
+              )}
             </div>
+
+            {gridResult.warnings && gridResult.warnings.length > 0 && (
+              <div className="text-[10px] p-2 rounded space-y-1" style={{ color: '#f57c00', backgroundColor: 'rgba(245,124,0,0.1)' }}>
+                {gridResult.warnings.map((w, i) => (
+                  <div key={i}>⚠ {w}</div>
+                ))}
+              </div>
+            )}
 
             <button
               onClick={handleOpenExport}

@@ -11,10 +11,15 @@ export function useMissionLoader() {
   const setOverlapFrontal = useMissionStore((s) => s.setOverlapFrontal);
   const setOverlapLateral = useMissionStore((s) => s.setOverlapLateral);
   const setAltitudeMode = useMissionStore((s) => s.setAltitudeMode);
+  const setMissionVariant = useMissionStore((s) => s.setMissionVariant);
+  const setWidthLeft = useMissionStore((s) => s.setWidthLeft);
+  const setWidthRight = useMissionStore((s) => s.setWidthRight);
 
   return useCallback(async (missionId: string) => {
     try {
       const mission = await api.missions.get(missionId);
+
+      setMissionVariant(mission.mission_type === 'linear_corridor' ? 'corridor' : 'grid');
 
       // Restore polygon in drawStore
       if (mission.polygon_geojson) {
@@ -57,6 +62,8 @@ export function useMissionLoader() {
         if (params.overlap_frontal) setOverlapFrontal(params.overlap_frontal);
         if (params.overlap_lateral) setOverlapLateral(params.overlap_lateral);
         if (params.altitude_mode) setAltitudeMode(params.altitude_mode);
+        if (params.width_left) setWidthLeft(params.width_left);
+        if (params.width_right) setWidthRight(params.width_right);
       }
 
       // Restore grid result
@@ -67,5 +74,5 @@ export function useMissionLoader() {
     } catch (err) {
       console.error('Failed to load mission:', err);
     }
-  }, [setGridResult, setDroneId, setAltitude, setOverlapFrontal, setOverlapLateral, setAltitudeMode]);
+  }, [setGridResult, setDroneId, setAltitude, setOverlapFrontal, setOverlapLateral, setAltitudeMode, setMissionVariant, setWidthLeft, setWidthRight]);
 }

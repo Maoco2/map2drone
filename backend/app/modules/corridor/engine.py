@@ -1,0 +1,385 @@
+"""
+Map2Drone Linear Corridor Engine.
+
+Computes a corridor flight plan from a centerline (GeoJSON LineString).
+
+All geometry operations run in an appropriate projected CRS (UTM zone,
+chosen from the corridor centroid) via pyproj + shapely, so offsets,
+buffers and distances are metric — never raw EPSG:4326 degrees.
+
+Supports asymmetric corridors (width_left / width_right in meters) and the
+same waypoint modes as the area grid: vertex (Takeoff), terrain (AGL) and
+photo (one waypoint per photo trigger).
+"""
+
+import math
+from typing import Optional
+
+from pyproj import CRS, Transformer
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, Polygon
+
+from app.models.schemas import Camera, Drone
+from app.modules.planning.elevation import ElevationProvider, create_provider
+from app.modules.planning.engine import calc_footprint, calc_gsd
+from app.schemas.schemas import CorridorGeometry, CorridorRequest, CorridorResponse, WaypointSchema
+
+
+def _get_camera(db_session, camera_id: str) -> Camera | None:
+    return db_session.query(Camera).filter(Camera.id == camera_id).first()
+
+
+def _extract_centerline_coords(centerline: dict) -> list[list[float]]:
+    coords = centerline.get("coordinates", [])
+    if not isinstance(coords, list):
+        raise ValueError("Centerline must be a GeoJSON LineString")
+    cleaned: list[list[float]] = []
+    for p in coords:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            cleaned.append([float(p[0]), float(p[1])])
+    if len(cleaned) < 2:
+        raise ValueError("Centerline must have at least 2 valid coordinate pairs")
+    return cleaned
+
+
+def _utm_epsg_for(lon: float, lat: float) -> int:
+    zone = int((lon + 180.0) // 6) + 1
+    zone = max(1, min(60, zone))
+    return 32600 + zone if lat >= 0 else 32700 + zone
+
+
+def _as_single_line(geom) -> Optional[LineString]:
+    """Return the longest LineString inside a geometry result."""
+    if isinstance(geom, LineString):
+        return geom if geom.length > 1e-9 else None
+    if isinstance(geom, MultiLineString):
+        best = max(geom.geoms, key=lambda g: g.length, default=None)
+        return best if best is not None and best.length > 1e-9 else None
+    if isinstance(geom, GeometryCollection):
+        lines = [g for g in geom.geoms if isinstance(g, LineString)]
+        if lines:
+            return max(lines, key=lambda g: g.length)
+    return None
+
+
+def _polyline_local_heading(p1: tuple[float, float], p2: tuple[float, float]) -> float:
+    """Heading in degrees clockwise from north for the local segment p1→p2."""
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+    return (math.degrees(math.atan2(dx, dy)) + 360.0) % 360.0
+
+
+def _build_corridor_polygon(left: LineString, right: LineString) -> Polygon:
+    ring = list(left.coords) + list(right.coords)[::-1]
+    poly = Polygon(ring)
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    return poly
+
+
+def _build_flight_segments(
+    center: LineString,
+    poly: Polygon,
+    width_left: float,
+    width_right: float,
+    line_spacing_m: float,
+) -> list[LineString]:
+    """Parallel flight lines along the corridor axis, clipped to the footprint."""
+    corridor_width = width_left + width_right
+    n = int(corridor_width / line_spacing_m)
+    if n < 1:
+        n = 1
+    if n * line_spacing_m < corridor_width:
+        n += 1
+    step = corridor_width / n
+    offsets = [-width_right + step * (i + 0.5) for i in range(n)]
+
+    segments: list[LineString] = []
+    for off in offsets:
+        curve = _as_single_line(center.offset_curve(off, quad_segs=16, join_style="round"))
+        if curve is None:
+            continue
+        inside = curve.intersection(poly)
+        part = _as_single_line(inside)
+        if part is None or part.length < max(1.0, line_spacing_m * 0.2):
+            continue
+        segments.append(part)
+    return segments
+
+
+# ---------------------------------------------------------------------------
+# Waypoint generation strategies
+# ---------------------------------------------------------------------------
+
+def _photo_waypoints(
+    segments: list[LineString],
+    altitude: float,
+    inverse: Transformer,
+    photo_spacing_m: float,
+) -> list[WaypointSchema]:
+    """One waypoint per photo position (action_type=1)."""
+    wps: list[WaypointSchema] = []
+    for idx, seg in enumerate(segments):
+        reverse = idx % 2 == 1
+        n = max(1, int(seg.length / photo_spacing_m))
+        for j in range(n):
+            frac = (j + 0.5) / n
+            d = frac * seg.length
+            pt = seg.interpolate(d)
+            d2 = min(d + 1.0, seg.length)
+            pt2 = seg.interpolate(d2)
+            hdg = _polyline_local_heading((pt.x, pt.y), (pt2.x, pt2.y))
+            if reverse:
+                hdg = (hdg + 180.0) % 360.0
+            lon, lat = inverse.transform(pt.x, pt.y)
+            wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=altitude, heading=hdg, action_type=1))
+    return wps
+
+
+def _vertex_waypoints(
+    segments: list[LineString],
+    altitude: float,
+    inverse: Transformer,
+    tolerance_m: float,
+) -> list[WaypointSchema]:
+    """Takeoff mode: simplified path vertices (entry/exit + curve points)."""
+    wps: list[WaypointSchema] = []
+    for idx, seg in enumerate(segments):
+        line = seg.simplify(tolerance_m, preserve_topology=False)
+        coords = list(line.coords)
+        if idx % 2 == 1:
+            coords = coords[::-1]
+        n = len(coords)
+        for i, (x, y) in enumerate(coords):
+            hdg = _polyline_local_heading(coords[i], coords[min(i + 1, n - 1)])
+            lon, lat = inverse.transform(x, y)
+            wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=altitude, heading=hdg, action_type=-1))
+    return wps
+
+
+def _terrain_waypoints(
+    segments: list[LineString],
+    altitude: float,
+    inverse: Transformer,
+    elevation_provider: Optional[ElevationProvider],
+    sample_interval_m: float,
+    elevation_threshold: float,
+) -> tuple[list[WaypointSchema], float]:
+    """Ground mode: vertex waypoints + additional waypoints at DEM break points."""
+    if not segments:
+        return [], 0.0
+
+    dem_samples: list[tuple[float, float, float]] = []  # (lat, lng, heading)
+    sample_pts: list[tuple[float, float]] = []
+
+    for idx, seg in enumerate(segments):
+        reverse = idx % 2 == 1
+        n = max(2, int(seg.length / sample_interval_m))
+        for j in range(n):
+            frac = j / (n - 1)
+            d = frac * seg.length
+            pt = seg.interpolate(d)
+            lon, lat = inverse.transform(pt.x, pt.y)
+            d2 = min(d + 1.0, seg.length)
+            pt2 = seg.interpolate(d2)
+            hdg = _polyline_local_heading((pt.x, pt.y), (pt2.x, pt2.y))
+            if reverse:
+                hdg = (hdg + 180.0) % 360.0
+            dem_samples.append((lat, lon, hdg))
+            sample_pts.append((lat, lon))
+
+    elevations = elevation_provider.get_elevations(sample_pts) if elevation_provider else [0.0] * len(sample_pts)
+
+    if not elevations or max(elevations) <= 0:
+        return _vertex_waypoints(segments, altitude, inverse, 15.0), 0.0
+
+    ref_ground = elevations[0]
+    wps: list[WaypointSchema] = []
+    sample_idx = 0
+
+    for seg in segments:
+        n = max(2, int(seg.length / sample_interval_m))
+        last_break_elev = elevations[sample_idx]
+        for j in range(n):
+            lat, lng, hdg = dem_samples[sample_idx]
+            elev = elevations[sample_idx]
+            adj_alt = altitude + (elev - ref_ground)
+            sample_idx += 1
+
+            if j != 0 and j != n - 1 and abs(elev - last_break_elev) <= elevation_threshold:
+                continue
+
+            wps.append(WaypointSchema(
+                latitude=lat, longitude=lng,
+                altitude=adj_alt, heading=hdg,
+                action_type=-1,
+                elevation_msnm=elev,
+                agl=altitude,
+            ))
+            if j != n - 1:
+                last_break_elev = elev
+
+    return wps, ref_ground
+
+
+# ---------------------------------------------------------------------------
+# GeoJSON output helpers
+# ---------------------------------------------------------------------------
+
+def _polygon_to_geojson(poly: Polygon, inverse: Transformer) -> dict:
+    ring = [list(inverse.transform(x, y)) for x, y in poly.exterior.coords]
+    return {"type": "Polygon", "coordinates": [ring]}
+
+
+def _flight_lines_to_geojson(segments: list[LineString], inverse: Transformer) -> dict:
+    features = []
+    for i, seg in enumerate(segments):
+        coords = [list(inverse.transform(x, y)) for x, y in seg.coords]
+        features.append({
+            "type": "Feature",
+            "id": f"cl_{i}",
+            "geometry": {"type": "LineString", "coordinates": coords},
+            "properties": {"type": "scan", "line": i},
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
+# ---------------------------------------------------------------------------
+# Main corridor entry point
+# ---------------------------------------------------------------------------
+
+def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
+    camera = _get_camera(db_session, req.camera_id)
+    if not camera:
+        raise ValueError("Camera not found")
+
+    drone = None
+    recommended_speed_ms = 10.0
+    if req.drone_id:
+        drone = db_session.query(Drone).filter(Drone.id == req.drone_id).first()
+
+    # Shutter-limited speed (same rule as the area grid)
+    gsd_m = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um) / 100
+    shutter_factor = 1.0 if camera.shutter_type == "mechanical" else 0.5
+    v_shutter = gsd_m / (2.0 * camera.shutter_speed_s) * shutter_factor
+    recommended_speed_ms = v_shutter
+    if drone and drone.max_speed_ms:
+        recommended_speed_ms = min(v_shutter, drone.max_speed_ms)
+
+    coords_geo = _extract_centerline_coords(req.centerline)
+    lats = [p[1] for p in coords_geo]
+    lons = [p[0] for p in coords_geo]
+    center_lat = (min(lats) + max(lats)) / 2
+    center_lon = (min(lons) + max(lons)) / 2
+
+    epsg = _utm_epsg_for(center_lon, center_lat)
+    crs_name = CRS.from_epsg(epsg).name
+    transformer = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(epsg), always_xy=True)
+    inverse = Transformer.from_crs(CRS.from_epsg(epsg), CRS.from_epsg(4326), always_xy=True)
+
+    center = LineString([transformer.transform(lon, lat) for lon, lat in coords_geo])
+    corridor_length = center.length
+    if corridor_length < 2.0:
+        raise ValueError("Centerline too short (must be at least 2 m)")
+
+    warnings: list[str] = []
+
+    left = _as_single_line(center.offset_curve(req.width_left, quad_segs=16, join_style="round"))
+    right = _as_single_line(center.offset_curve(-req.width_right, quad_segs=16, join_style="round"))
+    if left is None or right is None:
+        raise ValueError("Unable to build corridor offsets (centerline self-intersects or is too tight)")
+
+    poly = _build_corridor_polygon(left, right)
+    if poly.is_empty or len(poly.exterior.coords) < 4:
+        raise ValueError("Corridor footprint is invalid — use a smoother centerline or reduce widths")
+    if not poly.is_valid:
+        warnings.append(
+            "Corridor footprint self-intersected and was repaired automatically; "
+            "results may be approximate near sharp bends."
+        )
+    corridor_area = poly.area
+
+    gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
+    fw, fh = calc_footprint(gsd, camera.image_width_px, camera.image_height_px)
+
+    overlap_lat = req.overlap_lateral / 100
+    overlap_frt = req.overlap_frontal / 100
+    line_spacing_m = fw * (1 - overlap_lat)
+    photo_spacing_m = fh * (1 - overlap_frt)
+
+    segments = _build_flight_segments(center, poly, req.width_left, req.width_right, line_spacing_m)
+    num_lines = len(segments)
+    if num_lines == 0:
+        raise ValueError("Corridor is too narrow for the selected camera and overlap")
+
+    wp_mode = {"takeoff": "vertex", "ground": "terrain"}.get(req.altitude_mode, "photo")
+
+    elevation_provider: Optional[ElevationProvider] = None
+    dem_sample_interval = 10.0
+    dem_elevation_threshold = 5.0
+    if wp_mode == "terrain":
+        elevation_provider = create_provider()
+        res = req.dem_resolution_m or 30.0
+        dem_sample_interval = max(2.0, min(20.0, res * 0.67))
+        dem_elevation_threshold = max(1.0, min(5.0, res * 0.17))
+
+    if wp_mode == "photo":
+        waypoints = _photo_waypoints(segments, req.altitude, inverse, photo_spacing_m)
+        photo_count = len(waypoints)
+    elif wp_mode == "vertex":
+        tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
+        waypoints = _vertex_waypoints(segments, req.altitude, inverse, tol)
+        photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
+    else:  # terrain
+        waypoints, _ = _terrain_waypoints(
+            segments, req.altitude, inverse, elevation_provider,
+            dem_sample_interval, dem_elevation_threshold,
+        )
+        photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
+
+    if len(waypoints) > 200000:
+        raise ValueError(
+            f"Corridor too long: ~{len(waypoints)} waypoints estimated. "
+            f"Increase altitude ({req.altitude}m) or reduce overlap "
+            f"({req.overlap_frontal}%/{req.overlap_lateral}%)."
+        )
+    if len(waypoints) < 2:
+        raise ValueError("Corridor too short for the selected parameters")
+
+    total_distance = 0.0
+    for k in range(1, len(waypoints)):
+        dx = (
+            (waypoints[k].longitude - waypoints[k - 1].longitude)
+            * 111320 * math.cos(math.radians(waypoints[k].latitude))
+        )
+        dy = (waypoints[k].latitude - waypoints[k - 1].latitude) * 111320
+        total_distance += math.sqrt(dx * dx + dy * dy)
+
+    estimated_time_sec = total_distance / recommended_speed_ms + num_lines * 5
+    battery_minutes = float(drone.flight_time_min * 0.8) if drone and drone.flight_time_min else 25.0
+    battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
+
+    return CorridorResponse(
+        waypoints=waypoints,
+        total_distance=round(total_distance, 2),
+        estimated_time_sec=round(estimated_time_sec, 1),
+        photo_count=photo_count,
+        battery_count=battery_count,
+        gsd=round(gsd, 4),
+        footprint_width=round(fw, 2),
+        footprint_height=round(fh, 2),
+        line_spacing=round(line_spacing_m, 2),
+        photo_spacing=round(photo_spacing_m, 2),
+        recommended_speed_ms=round(recommended_speed_ms, 2),
+        num_lines=num_lines,
+        waypoint_mode=wp_mode,
+        corridor_length_m=round(corridor_length, 2),
+        corridor_area_m2=round(corridor_area, 2),
+        geometry=CorridorGeometry(
+            polygon_geojson=_polygon_to_geojson(poly, inverse),
+            flight_lines_geojson=_flight_lines_to_geojson(segments, inverse),
+            epsg_out=epsg,
+            crs_name=crs_name,
+            transformation=f"EPSG:4326 -> EPSG:{epsg} (pyproj/shapely projected geometry)",
+        ),
+        warnings=warnings,
+    )

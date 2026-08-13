@@ -6,6 +6,8 @@ interface MissionState {
   generating: boolean;
   error: string | null;
   flightLinesGeoJSON: GeoJSON.FeatureCollection | null;
+  corridorPolygon: GeoJSON.Polygon | null;
+  corridorWarnings: string[];
   droneId: string;
   altitude: number;
   overlapFrontal: number;
@@ -13,6 +15,9 @@ interface MissionState {
   altitudeMode: string;
   waypointMode: string;
   photoSpacing: number;
+  missionVariant: 'grid' | 'corridor';
+  widthLeft: number;
+  widthRight: number;
 
   setDroneId: (id: string) => void;
   setAltitude: (alt: number) => void;
@@ -22,6 +27,9 @@ interface MissionState {
   setGridResult: (result: GridResult | null) => void;
   setGenerating: (v: boolean) => void;
   setError: (err: string | null) => void;
+  setMissionVariant: (v: 'grid' | 'corridor') => void;
+  setWidthLeft: (w: number) => void;
+  setWidthRight: (w: number) => void;
   clear: () => void;
 }
 
@@ -75,6 +83,8 @@ export const useMissionStore = create<MissionState>((set) => ({
   generating: false,
   error: null,
   flightLinesGeoJSON: null,
+  corridorPolygon: null,
+  corridorWarnings: [],
   droneId: '',
   altitude: 100,
   overlapFrontal: 75,
@@ -82,6 +92,9 @@ export const useMissionStore = create<MissionState>((set) => ({
   altitudeMode: 'takeoff',
   waypointMode: 'photo',
   photoSpacing: 0,
+  missionVariant: 'grid',
+  widthLeft: 100,
+  widthRight: 100,
 
   setDroneId: (id) => set({ droneId: id }),
   setAltitude: (alt) => set({ altitude: alt }),
@@ -90,31 +103,42 @@ export const useMissionStore = create<MissionState>((set) => ({
   setAltitudeMode: (mode) => set({ altitudeMode: mode }),
   setGridResult: (result) => {
     if (!result) {
-      set({ gridResult: null, flightLinesGeoJSON: null });
+      set({ gridResult: null, flightLinesGeoJSON: null, corridorPolygon: null, corridorWarnings: [] });
       return;
     }
     const lines: GeoJSON.Feature[] = [];
     const waypoints = result.waypoints;
     const isInterval = result.waypoint_mode === 'vertex' || result.waypoint_mode === 'terrain';
 
-    for (let i = 0; i < waypoints.length - 1; i++) {
-      const wp1 = waypoints[i];
-      const wp2 = waypoints[i + 1];
-      const coords: [number, number][] = [
-        [wp1.longitude, wp1.latitude],
-        [wp2.longitude, wp2.latitude],
-      ];
-      const diff = headingDiff(wp1.heading, wp2.heading);
-      if (diff > 1 && diff < 179) {
-        continue;
-      }
-      const isGiro = diff > 90;
-      lines.push({
-        type: 'Feature',
-        id: `fl_${i}`,
-        geometry: { type: 'LineString', coordinates: coords },
-        properties: { type: isGiro ? 'giro' : 'scan' },
+    if (result.geometry?.flight_lines_geojson?.features?.length) {
+      result.geometry.flight_lines_geojson.features.forEach((f, i) => {
+        lines.push({
+          type: 'Feature',
+          id: `fl_${i}`,
+          geometry: f.geometry,
+          properties: { type: 'scan' },
+        });
       });
+    } else {
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const wp1 = waypoints[i];
+        const wp2 = waypoints[i + 1];
+        const coords: [number, number][] = [
+          [wp1.longitude, wp1.latitude],
+          [wp2.longitude, wp2.latitude],
+        ];
+        const diff = headingDiff(wp1.heading, wp2.heading);
+        if (diff > 1 && diff < 179) {
+          continue;
+        }
+        const isGiro = diff > 90;
+        lines.push({
+          type: 'Feature',
+          id: `fl_${i}`,
+          geometry: { type: 'LineString', coordinates: coords },
+          properties: { type: isGiro ? 'giro' : 'scan' },
+        });
+      }
     }
 
     const points: GeoJSON.Feature[] = waypoints.map((wp, i) => ({
@@ -134,18 +158,25 @@ export const useMissionStore = create<MissionState>((set) => ({
     set({
       gridResult: result,
       flightLinesGeoJSON: fc,
+      corridorPolygon: result.geometry?.polygon_geojson ?? null,
+      corridorWarnings: result.warnings ?? [],
       waypointMode: result.waypoint_mode || 'photo',
       photoSpacing: result.photo_spacing,
     });
   },
   setGenerating: (v) => set({ generating: v }),
   setError: (err) => set({ error: err }),
+  setMissionVariant: (v) => set({ missionVariant: v }),
+  setWidthLeft: (w) => set({ widthLeft: w }),
+  setWidthRight: (w) => set({ widthRight: w }),
   clear: () =>
     set({
       gridResult: null,
       generating: false,
       error: null,
       flightLinesGeoJSON: null,
+      corridorPolygon: null,
+      corridorWarnings: [],
       altitudeMode: 'takeoff',
       waypointMode: 'photo',
       photoSpacing: 0,

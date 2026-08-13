@@ -98,6 +98,18 @@ export interface GridResult {
   sweep_deg?: number;
   num_lines?: number;
   waypoint_mode?: 'photo' | 'vertex' | 'terrain';
+  corridor_length_m?: number;
+  corridor_area_m2?: number;
+  geometry?: CorridorGeometry;
+  warnings?: string[];
+}
+
+export interface CorridorGeometry {
+  polygon_geojson: GeoJSON.Polygon;
+  flight_lines_geojson: GeoJSON.FeatureCollection;
+  epsg_out: number;
+  crs_name: string;
+  transformation: string;
 }
 
 export interface ExportCompatibility {

@@ -123,6 +123,20 @@ export const api = {
       grid_type?: string;
       altitude_mode?: string;
     }) => fetchJson<GridResult>('/planning/grid', { method: 'POST', body: JSON.stringify(data) }),
+    corridor: (data: {
+      centerline: GeoJSON.LineString;
+      width_left: number;
+      width_right: number;
+      altitude: number;
+      overlap_frontal: number;
+      overlap_lateral: number;
+      camera_id?: string;
+      drone_id: string;
+      project_id?: string;
+      home_latitude?: number;
+      home_longitude?: number;
+      altitude_mode?: string;
+    }) => fetchJson<GridResult>('/planning/corridor', { method: 'POST', body: JSON.stringify(data) }),
     gsd: (data: { altitude: number; camera_id: string }) =>
       fetchJson<{ gsd: number; footprint_width: number; footprint_height: number }>('/planning/gsd', {
         method: 'POST',

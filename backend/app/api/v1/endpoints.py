@@ -1,29 +1,34 @@
 import json
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from app.core.database import get_db, engine, Base
+
+from app.core.auth import create_access_token, get_current_user_id, hash_password, verify_password
+from app.core.database import Base, engine, get_db
+from app.core.seed_data import CAMERAS, DRONES
+from app.models.schemas import Camera, Drone, Mission, Project, User
+from app.modules.corridor import compute_corridor
+from app.modules.planning.engine import compute_grid, compute_gsd
 from app.schemas.schemas import (
-    ProjectCreate,
-    ProjectResponse,
-    MissionCreate,
-    MissionUpdate,
-    MissionResponse,
-    DroneResponse,
     CameraResponse,
+    CorridorRequest,
+    CorridorResponse,
+    DroneResponse,
     GridRequest,
     GridResponse,
     GSDRequest,
     GSDResponse,
-    RegisterRequest,
     LoginRequest,
-    UserResponse,
+    MissionCreate,
+    MissionResponse,
+    MissionUpdate,
+    ProjectCreate,
+    ProjectResponse,
+    RegisterRequest,
     TokenResponse,
+    UserResponse,
 )
-from app.models.schemas import Project, Mission, Drone, Camera, User
-from app.core.seed_data import CAMERAS, DRONES
-from app.modules.planning.engine import compute_grid, compute_gsd
-from app.core.auth import hash_password, verify_password, create_access_token, get_current_user_id
 
 router = APIRouter(prefix="/api/v1")
 
@@ -256,13 +261,62 @@ def calculate_grid(req: GridRequest, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Grid computation failed: {str(e)}")
 
 
+@router.post("/planning/corridor", response_model=CorridorResponse)
+def calculate_corridor(req: CorridorRequest, db: Session = Depends(get_db)):
+    try:
+        req.camera_id = _resolve_camera_id(req, db)
+        result = compute_corridor(req, db)
+
+        # Auto-create mission if project_id provided
+        mission_id = None
+        if req.project_id:
+            proj = db.query(Project).filter(Project.id == req.project_id).first()
+            if proj:
+                count = db.query(Mission).filter(Mission.project_id == req.project_id).count()
+                if count < 30:
+                    mission = Mission(
+                        project_id=req.project_id,
+                        name=f"Mission {count + 1}",
+                        mission_type="linear_corridor",
+                        polygon_geojson=json.dumps(result.geometry.polygon_geojson),
+                        waypoints_json=json.dumps([wp.model_dump() for wp in result.waypoints]),
+                        parameters_json=json.dumps({
+                            "altitude": req.altitude,
+                            "overlap_frontal": req.overlap_frontal,
+                            "overlap_lateral": req.overlap_lateral,
+                            "drone_id": req.drone_id,
+                            "camera_id": req.camera_id,
+                            "altitude_mode": req.altitude_mode,
+                            "width_left": req.width_left,
+                            "width_right": req.width_right,
+                        }),
+                        grid_result_json=json.dumps(result.model_dump()),
+                    )
+                    db.add(mission)
+                    db.commit()
+                    db.refresh(mission)
+                    mission_id = mission.id
+
+        result.mission_id = mission_id
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Corridor computation failed: {str(e)}")
+
+
 # ── Export ──────────────────────────────────────────────────────────────────
 
 from app.modules.export import (
-    get_exporter, list_exporters,
-    MissionExportData, ExportWaypoint, HomePoint, DroneInfo, CameraInfo, Action,
+    CameraInfo,
+    DroneInfo,
+    ExportWaypoint,
+    HomePoint,
+    MissionExportData,
+    get_exporter,
+    list_exporters,
 )
-from app.schemas.schemas import ExportFormatItem, ExportFormatCheckItem, ExportRequest, MultiExportRequest
+from app.schemas.schemas import ExportFormatCheckItem, ExportFormatItem, ExportRequest, MultiExportRequest
 
 
 def _build_mission(req: ExportRequest | MultiExportRequest) -> MissionExportData:
@@ -343,7 +397,8 @@ def check_export_formats(req: MultiExportRequest):
 
 @router.post("/export/multi")
 def export_multi(req: MultiExportRequest):
-    import io, zipfile
+    import io
+    import zipfile
     from datetime import datetime
 
     buf = io.BytesIO()

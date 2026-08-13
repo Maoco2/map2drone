@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
@@ -136,6 +137,51 @@ class GridResponse(BaseModel):
     sweep_deg: float = 0
     num_lines: int = 0
     waypoint_mode: str = "photo"
+
+
+class CorridorRequest(BaseModel):
+    centerline: dict
+    width_left: float = Field(..., gt=0, le=10000)
+    width_right: float = Field(..., gt=0, le=10000)
+    altitude: float = Field(..., ge=10, le=500)
+    overlap_frontal: float = Field(..., ge=50, le=95)
+    overlap_lateral: float = Field(..., ge=30, le=90)
+    camera_id: Optional[str] = None
+    drone_id: Optional[str] = None
+    project_id: Optional[str] = None
+    home_latitude: Optional[float] = None
+    home_longitude: Optional[float] = None
+    altitude_mode: str = "takeoff"
+    dem_resolution_m: Optional[float] = None
+
+
+class CorridorGeometry(BaseModel):
+    polygon_geojson: dict = {}
+    flight_lines_geojson: dict = {}
+    epsg_out: int = 4326
+    crs_name: str = "WGS84"
+    transformation: str = ""
+
+
+class CorridorResponse(BaseModel):
+    waypoints: list[WaypointSchema]
+    total_distance: float
+    estimated_time_sec: float
+    photo_count: int
+    battery_count: int
+    gsd: float
+    footprint_width: float
+    footprint_height: float
+    line_spacing: float
+    photo_spacing: float
+    recommended_speed_ms: float = 0
+    mission_id: Optional[str] = None
+    num_lines: int = 0
+    waypoint_mode: str = "photo"
+    corridor_length_m: float = 0
+    corridor_area_m2: float = 0
+    geometry: CorridorGeometry = CorridorGeometry()
+    warnings: list[str] = []
 
 
 class GSDRequest(BaseModel):
