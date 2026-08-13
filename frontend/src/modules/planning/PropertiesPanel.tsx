@@ -117,9 +117,18 @@ export default function PropertiesPanel() {
     setError(null);
     try {
       if (missionVariant === 'corridor') {
-        const lineFeature = features
+        let lineFeature = features
           .filter((f) => f.type === 'polyline' && f.completed && f.points.length >= 2)
           .pop();
+        if (!lineFeature) {
+          const currentFeature = useDrawStore.getState().currentFeature;
+          if (currentFeature && currentFeature.type === 'polyline' && currentFeature.points.length >= 2) {
+            const committed = { ...currentFeature, completed: true };
+            useDrawStore.getState().addFeature(committed);
+            useDrawStore.getState().setCurrentFeature(null);
+            lineFeature = committed;
+          }
+        }
         if (!lineFeature) {
           setError('Draw the corridor centerline first using the Polyline tool');
           setGenerating(false);
@@ -437,7 +446,9 @@ export default function PropertiesPanel() {
               Centerline:{' '}
               {features.filter((f) => f.type === 'polyline' && f.completed && f.points.length >= 2).length > 0
                 ? 'drawn'
-                : 'not drawn yet'}
+                : useDrawStore.getState().currentFeature?.type === 'polyline' && (useDrawStore.getState().currentFeature?.points.length ?? 0) >= 2
+                  ? 'in progress'
+                  : 'not drawn yet'}
             </div>
           </div>
         ) : (

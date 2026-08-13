@@ -3,9 +3,12 @@ import type { LayerProps } from 'react-map-gl/maplibre';
 import { useDrawStore } from './drawStore';
 import { useMemo } from 'react';
 
+const polygonOnly = ['match', ['get', 'type'], ['polygon', 'rectangle', 'circle'], true, false] as any;
+
 const fillLayer: LayerProps = {
   id: 'draw-fill',
   type: 'fill',
+  filter: polygonOnly,
   paint: {
     'fill-color': '#4f8cff',
     'fill-opacity': 0.15,
@@ -25,6 +28,7 @@ const lineLayer: LayerProps = {
 const outlineLayer: LayerProps = {
   id: 'draw-outline',
   type: 'line',
+  filter: polygonOnly,
   paint: {
     'line-color': '#4f8cff',
     'line-width': 3,
