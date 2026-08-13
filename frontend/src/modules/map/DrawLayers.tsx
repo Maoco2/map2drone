@@ -18,10 +18,22 @@ const fillLayer: LayerProps = {
 const lineLayer: LayerProps = {
   id: 'draw-line',
   type: 'line',
+  filter: ['!=', ['get', 'type'], 'polyline'],
   paint: {
     'line-color': '#4f8cff',
     'line-width': 2,
     'line-opacity': 0.8,
+  },
+};
+
+const polylineLayer: LayerProps = {
+  id: 'draw-polyline',
+  type: 'line',
+  filter: ['==', ['get', 'type'], 'polyline'],
+  paint: {
+    'line-color': '#e53935',
+    'line-width': 3,
+    'line-opacity': 0.9,
   },
 };
 
@@ -195,7 +207,7 @@ function featuresToGeoJSON(
           type: 'LineString',
           coordinates: c.points.map((p) => [p.lng, p.lat]),
         },
-        properties: { type: 'line', temp: true },
+        properties: { type: c.type, temp: true },
       });
     }
 
@@ -225,6 +237,7 @@ export default function DrawLayers() {
     <Source id="draw" type="geojson" data={geoJSON}>
       <Layer {...fillLayer} />
       <Layer {...lineLayer} />
+      <Layer {...polylineLayer} />
       <Layer {...pointLayer} />
       <Layer {...outlineLayer} />
     </Source>

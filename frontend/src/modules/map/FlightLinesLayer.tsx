@@ -57,6 +57,16 @@ const corridorOutlineLayer: LayerProps = {
   },
 };
 
+const centerlineLayer: LayerProps = {
+  id: 'corridor-centerline',
+  type: 'line',
+  paint: {
+    'line-color': '#e53935',
+    'line-width': 3,
+    'line-opacity': 0.9,
+  },
+};
+
 function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
   const coords = (feature.geometry as GeoJSON.Point).coordinates;
   const props = feature.properties as Record<string, any>;
@@ -115,6 +125,7 @@ function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
 export default function FlightLinesLayer() {
   const geoJSON = useMissionStore((s) => s.flightLinesGeoJSON);
   const corridorPolygon = useMissionStore((s) => s.corridorPolygon);
+  const centerline = useMissionStore((s) => s.gridResult?.geometry?.centerline_geojson);
 
   const data = useMemo(() => {
     if (!geoJSON) return { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
@@ -134,6 +145,11 @@ export default function FlightLinesLayer() {
         <Source id="corridor-polygon" type="geojson" data={corridorPolygon}>
           <Layer {...corridorFillLayer} />
           <Layer {...corridorOutlineLayer} />
+        </Source>
+      )}
+      {centerline && (
+        <Source id="corridor-centerline" type="geojson" data={centerline}>
+          <Layer {...centerlineLayer} />
         </Source>
       )}
       <Source id="flight-lines" type="geojson" data={data}>
