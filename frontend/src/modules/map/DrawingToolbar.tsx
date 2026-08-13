@@ -10,6 +10,7 @@ const TOOLS = [
   { id: 'rectangle', icon: '⬜', label: 'Rectangle' },
   { id: 'circle', icon: '⭕', label: 'Circle' },
 
+  { id: 'polyline', icon: '〰', label: 'Polyline' },
   { id: 'measure', icon: '📏', label: 'Measure' },
   { id: 'delete', icon: '🗑️', label: 'Delete' },
   { id: 'snap', icon: '⚡', label: 'Snap' },

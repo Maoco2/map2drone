@@ -118,10 +118,10 @@ export default function PropertiesPanel() {
     try {
       if (missionVariant === 'corridor') {
         const lineFeature = features
-          .filter((f) => f.type === 'line' && f.completed && f.points.length >= 2)
+          .filter((f) => f.type === 'polyline' && f.completed && f.points.length >= 2)
           .pop();
         if (!lineFeature) {
-          setError('Draw the corridor centerline first using the Line tool');
+          setError('Draw the corridor centerline first using the Polyline tool');
           setGenerating(false);
           return;
         }
@@ -355,7 +355,8 @@ export default function PropertiesPanel() {
             />
             <div className="text-[10px] px-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
               Import a centerline from KML, KMZ, GeoPackage, GeoJSON or Shapefile (.shp); or draw it with
-              the <b>Line</b> tool (📏 icon next to Circle) and press Generate.
+              the <b>Polyline</b> tool (〰 icon, above Measure) pressing Enter or double-click to finish, then
+              press Generate.
             </div>
           </div>
         )}
@@ -434,7 +435,7 @@ export default function PropertiesPanel() {
           <div className="text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
             <div>
               Centerline:{' '}
-              {features.filter((f) => f.type === 'line' && f.completed && f.points.length >= 2).length > 0
+              {features.filter((f) => f.type === 'polyline' && f.completed && f.points.length >= 2).length > 0
                 ? 'drawn'
                 : 'not drawn yet'}
             </div>

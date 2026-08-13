@@ -79,7 +79,7 @@ export function useDrawTools() {
     if (!current || current.completed) {
       const newFeature = {
         id: nextId(),
-        type: activeTool as 'polygon' | 'rectangle' | 'line',
+        type: activeTool as 'polygon' | 'rectangle' | 'line' | 'polyline',
         points: [point],
         completed: false,
       };
@@ -103,7 +103,7 @@ export function useDrawTools() {
       });
       useDrawStore.getState().setCurrentFeature(null);
       useDrawStore.getState().setDrawMode('none');
-    } else if (activeTool === 'line') {
+    } else if (activeTool === 'line' || activeTool === 'polyline') {
       useDrawStore.getState().setCurrentFeature({
         ...current,
         points: [...current.points, point],
@@ -123,7 +123,7 @@ export function useDrawTools() {
     const current = useDrawStore.getState().currentFeature;
     if (!current || current.completed) return;
 
-    if (activeTool === 'polygon' || activeTool === 'line') {
+    if (activeTool === 'polygon' || activeTool === 'line' || activeTool === 'polyline') {
       if (current.points.length >= 2) {
         const completedFeature = { ...current, completed: true };
         useDrawStore.getState().setCurrentFeature(null);
@@ -143,7 +143,7 @@ export function useDrawTools() {
       return;
     }
 
-    if (activeTool === 'polygon' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'line' || activeTool === 'waypoint' || activeTool === 'measure') {
+    if (activeTool === 'polygon' || activeTool === 'rectangle' || activeTool === 'circle' || activeTool === 'line' || activeTool === 'polyline' || activeTool === 'waypoint' || activeTool === 'measure') {
       useMapStore.getState().setCursor('crosshair');
     } else if (activeTool === 'delete') {
       useMapStore.getState().setCursor('pointer');
@@ -188,7 +188,7 @@ export function useDrawTools() {
     }
     if (e.key === 'Enter' && current && !current.completed) {
       if (current.points.length >= 2) {
-        if (current.type === 'line' || current.type === 'polygon') {
+        if (current.type === 'line' || current.type === 'polygon' || current.type === 'polyline') {
           useDrawStore.getState().addFeature({ ...current, completed: true });
           useDrawStore.getState().setCurrentFeature(null);
           useDrawStore.getState().setDrawMode('none');

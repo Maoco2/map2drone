@@ -105,6 +105,14 @@ function featuresToGeoJSON(
           };
         }
         break;
+      case 'polyline':
+        if (f.points.length >= 2) {
+          geometry = {
+            type: 'LineString',
+            coordinates: f.points.map((p) => [p.lng, p.lat]),
+          };
+        }
+        break;
       case 'waypoint':
         geometry = { type: 'Point', coordinates: [f.points[0].lng, f.points[0].lat] };
         break;
@@ -176,7 +184,7 @@ function featuresToGeoJSON(
       });
     }
 
-    if (c.type === 'line' && c.points.length >= 2) {
+    if ((c.type === 'line' || c.type === 'polyline') && c.points.length >= 2) {
       fc.features.push({
         type: 'Feature', id: 'temp',
         geometry: {

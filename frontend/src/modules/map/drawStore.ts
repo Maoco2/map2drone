@@ -8,7 +8,7 @@ export interface DrawPoint {
 
 export interface DrawFeature {
   id: string;
-  type: 'polygon' | 'rectangle' | 'circle' | 'line' | 'waypoint';
+  type: 'polygon' | 'rectangle' | 'circle' | 'line' | 'polyline' | 'waypoint';
   points: DrawPoint[];
   properties?: Record<string, any>;
   completed: boolean;
@@ -127,6 +127,12 @@ export const useDrawStore = create<DrawStore>((set, get) => ({
               break;
             }
             case 'line':
+              geometry = {
+                type: 'LineString',
+                coordinates: f.points.map((p) => [p.lng, p.lat]),
+              };
+              break;
+            case 'polyline':
               geometry = {
                 type: 'LineString',
                 coordinates: f.points.map((p) => [p.lng, p.lat]),
