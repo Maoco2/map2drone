@@ -158,6 +158,7 @@ class CorridorRequest(BaseModel):
 class CorridorGeometry(BaseModel):
     polygon_geojson: dict = {}
     flight_lines_geojson: dict = {}
+    centerline_geojson: dict = {}
     epsg_out: int = 4326
     crs_name: str = "WGS84"
     transformation: str = ""
@@ -182,6 +183,12 @@ class CorridorResponse(BaseModel):
     corridor_area_m2: float = 0
     geometry: CorridorGeometry = CorridorGeometry()
     warnings: list[str] = []
+
+
+class CorridorImportResponse(CorridorResponse):
+    import_format: str = ""
+    import_source: str = ""
+    features_found: int = 0
 
 
 class GSDRequest(BaseModel):

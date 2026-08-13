@@ -15,6 +15,7 @@ dependencies = [
     "numpy",
     "scipy",
     "shapely",
+    "pyshp",
     "python-multipart",
     "python-jose[cryptography]",
     "passlib[bcrypt]",

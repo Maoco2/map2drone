@@ -1,6 +1,7 @@
 import json
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -9,9 +10,11 @@ from app.core.database import Base, engine, get_db
 from app.core.seed_data import CAMERAS, DRONES
 from app.models.schemas import Camera, Drone, Mission, Project, User
 from app.modules.corridor import compute_corridor
+from app.modules.corridor.parsers import load_centerline
 from app.modules.planning.engine import compute_grid, compute_gsd
 from app.schemas.schemas import (
     CameraResponse,
+    CorridorImportResponse,
     CorridorRequest,
     CorridorResponse,
     DroneResponse,
@@ -261,48 +264,107 @@ def calculate_grid(req: GridRequest, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Grid computation failed: {str(e)}")
 
 
+def _auto_create_corridor_mission(db, req: CorridorRequest, result) -> Optional[str]:
+    """Create a linear_corridor Mission when a project is provided."""
+    mission_id = None
+    if req.project_id:
+        proj = db.query(Project).filter(Project.id == req.project_id).first()
+        if proj:
+            count = db.query(Mission).filter(Mission.project_id == req.project_id).count()
+            if count < 30:
+                mission = Mission(
+                    project_id=req.project_id,
+                    name=f"Mission {count + 1}",
+                    mission_type="linear_corridor",
+                    polygon_geojson=json.dumps(result.geometry.polygon_geojson),
+                    waypoints_json=json.dumps([wp.model_dump() for wp in result.waypoints]),
+                    parameters_json=json.dumps({
+                        "altitude": req.altitude,
+                        "overlap_frontal": req.overlap_frontal,
+                        "overlap_lateral": req.overlap_lateral,
+                        "drone_id": req.drone_id,
+                        "camera_id": req.camera_id,
+                        "altitude_mode": req.altitude_mode,
+                        "width_left": req.width_left,
+                        "width_right": req.width_right,
+                    }),
+                    grid_result_json=json.dumps(result.model_dump()),
+                )
+                db.add(mission)
+                db.commit()
+                db.refresh(mission)
+                mission_id = mission.id
+    return mission_id
+
+
 @router.post("/planning/corridor", response_model=CorridorResponse)
 def calculate_corridor(req: CorridorRequest, db: Session = Depends(get_db)):
     try:
         req.camera_id = _resolve_camera_id(req, db)
         result = compute_corridor(req, db)
-
-        # Auto-create mission if project_id provided
-        mission_id = None
-        if req.project_id:
-            proj = db.query(Project).filter(Project.id == req.project_id).first()
-            if proj:
-                count = db.query(Mission).filter(Mission.project_id == req.project_id).count()
-                if count < 30:
-                    mission = Mission(
-                        project_id=req.project_id,
-                        name=f"Mission {count + 1}",
-                        mission_type="linear_corridor",
-                        polygon_geojson=json.dumps(result.geometry.polygon_geojson),
-                        waypoints_json=json.dumps([wp.model_dump() for wp in result.waypoints]),
-                        parameters_json=json.dumps({
-                            "altitude": req.altitude,
-                            "overlap_frontal": req.overlap_frontal,
-                            "overlap_lateral": req.overlap_lateral,
-                            "drone_id": req.drone_id,
-                            "camera_id": req.camera_id,
-                            "altitude_mode": req.altitude_mode,
-                            "width_left": req.width_left,
-                            "width_right": req.width_right,
-                        }),
-                        grid_result_json=json.dumps(result.model_dump()),
-                    )
-                    db.add(mission)
-                    db.commit()
-                    db.refresh(mission)
-                    mission_id = mission.id
-
-        result.mission_id = mission_id
+        result.mission_id = _auto_create_corridor_mission(db, req, result)
         return result
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Corridor computation failed: {str(e)}")
+
+
+@router.post("/corridor/import", response_model=CorridorImportResponse)
+async def import_corridor(
+    file: UploadFile = File(...),
+    width_left: float = Form(100),
+    width_right: float = Form(100),
+    altitude: float = Form(100),
+    overlap_frontal: float = Form(75),
+    overlap_lateral: float = Form(65),
+    altitude_mode: str = Form("takeoff"),
+    camera_id: str = Form(""),
+    drone_id: str = Form(""),
+    project_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    data = await file.read()
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 50 MB)")
+    if not data:
+        raise HTTPException(400, "Empty file")
+
+    try:
+        fmt, centerline, features_found, warnings = load_centerline(file.filename or "", data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    req = CorridorRequest(
+        centerline={"type": "LineString", "coordinates": centerline},
+        width_left=width_left,
+        width_right=width_right,
+        altitude=altitude,
+        overlap_frontal=overlap_frontal,
+        overlap_lateral=overlap_lateral,
+        camera_id=camera_id or None,
+        drone_id=drone_id or None,
+        project_id=project_id or None,
+        altitude_mode=altitude_mode,
+    )
+    try:
+        req.camera_id = _resolve_camera_id(req, db)
+        result = compute_corridor(req, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Corridor computation failed: {str(e)}")
+
+    result.mission_id = _auto_create_corridor_mission(db, req, result)
+    merged_warnings = list(result.warnings) + list(warnings)
+    payload = result.model_dump()
+    payload["warnings"] = merged_warnings
+    return CorridorImportResponse(
+        **payload,
+        import_format=fmt,
+        import_source=file.filename or "",
+        features_found=features_found,
+    )
 
 
 # ── Export ──────────────────────────────────────────────────────────────────

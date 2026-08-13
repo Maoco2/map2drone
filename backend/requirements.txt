@@ -10,6 +10,7 @@ scipy
 shapely
 numpy
 pyproj
+pyshp
 python-multipart
 python-jose[cryptography]
 passlib[bcrypt]

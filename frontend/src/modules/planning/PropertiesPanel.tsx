@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/shared/utils/api';
 import { useDrawStore } from '@/modules/map/drawStore';
@@ -79,6 +79,8 @@ export default function PropertiesPanel() {
 
   const [selectedMfr, setSelectedMfr] = useState('');
   const [gridType, setGridType] = useState<'simple' | 'cross'>('simple');
+  const [importingFile, setImportingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const manufacturers = useMemo(() => {
     if (!drones) return [];
     return [...new Set(drones.map((d: Drone) => d.manufacturer))].sort();
@@ -173,6 +175,41 @@ export default function PropertiesPanel() {
   const handleOpenExport = useCallback(() => {
     useSidebarStore.getState().setActiveTab('export');
   }, []);
+
+  const handleImportFile = useCallback(async (file: File) => {
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const allowed = ['geojson', 'json', 'kml', 'kmz', 'shp', 'gpkg'];
+    if (!allowed.includes(ext)) {
+      setError(`Unsupported format: .${ext}`);
+      return;
+    }
+    if (!droneId) {
+      setError('Select a drone first');
+      return;
+    }
+    const drone = drones?.find((d: Drone) => d.id === droneId);
+    setImportingFile(true);
+    setError(null);
+    try {
+      const result = await api.planning.corridorImport(file, {
+        width_left: Number(widthLeft),
+        width_right: Number(widthRight),
+        altitude: Number(altitude),
+        overlap_frontal: Number(overlapFrontal),
+        overlap_lateral: Number(overlapLateral),
+        altitude_mode: altitudeMode,
+        camera_id: drone?.camera_id || undefined,
+        drone_id: droneId,
+        project_id: selectedProjectId || undefined,
+      });
+      setGridResult(result);
+      fetchMissions();
+    } catch (err: any) {
+      setError(err.message || 'Corridor import failed');
+    } finally {
+      setImportingFile(false);
+    }
+  }, [drones, droneId, altitude, overlapFrontal, overlapLateral, altitudeMode, widthLeft, widthRight, selectedProjectId, setGridResult, setError, fetchMissions]);
 
   const field = (label: string, value: string | number, onChange: (v: any) => void, opts?: { min?: number; max?: number; step?: number }) => (
     <div className="flex items-center gap-2">
@@ -293,9 +330,32 @@ export default function PropertiesPanel() {
             <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>Corridor Width</div>
             {field('Width Left (m)', widthLeft, setWidthLeft, { min: 1, max: 10000, step: 1 })}
             {field('Width Right (m)', widthRight, setWidthRight, { min: 1, max: 10000, step: 1 })}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importingFile}
+              className="w-full py-1.5 text-xs rounded font-medium border transition-colors disabled:opacity-40 hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            >
+              {importingFile ? 'Importing...' : '📂 Import centerline file'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              accept=".geojson,.json,.kml,.kmz,.shp,.gpkg"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleImportFile(f);
+                e.target.value = '';
+              }}
+            />
             <div className="text-[10px] px-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              Draw the corridor centerline on the map with the <b>Line</b> tool (📏 icon
-              next to Circle) before generating.
+              Import a centerline from KML, KMZ, GeoPackage, GeoJSON or Shapefile (.shp); or draw it with
+              the <b>Line</b> tool (📏 icon next to Circle) and press Generate.
             </div>
           </div>
         )}
@@ -419,6 +479,9 @@ export default function PropertiesPanel() {
               )}
               {gridResult.corridor_area_m2 != null && (
                 <div className="flex justify-between"><span>Corridor area:</span><span className="font-mono">{gridResult.corridor_area_m2.toFixed(0)} m²</span></div>
+              )}
+              {(gridResult as any).import_source && (
+                <div className="flex justify-between"><span>Source:</span><span className="font-mono">{(gridResult as any).import_format} · {(gridResult as any).import_source}</span></div>
               )}
               <div className="flex justify-between"><span>Distance:</span><span className="font-mono">{gridResult.total_distance.toFixed(0)} m</span></div>
               <div className="flex justify-between"><span>Photos:</span><span className="font-mono">{gridResult.photo_count}</span></div>

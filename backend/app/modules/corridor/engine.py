@@ -377,6 +377,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         geometry=CorridorGeometry(
             polygon_geojson=_polygon_to_geojson(poly, inverse),
             flight_lines_geojson=_flight_lines_to_geojson(segments, inverse),
+            centerline_geojson={"type": "LineString", "coordinates": coords_geo},
             epsg_out=epsg,
             crs_name=crs_name,
             transformation=f"EPSG:4326 -> EPSG:{epsg} (pyproj/shapely projected geometry)",

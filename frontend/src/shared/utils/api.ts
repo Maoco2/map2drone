@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { Project, Mission, Drone, Camera, GridResult, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
+import type { Project, Mission, Drone, Camera, GridResult, CorridorImportResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
 
 const API_BASE = '/api/v1';
 
@@ -62,6 +62,35 @@ async function fetchBlob(url: string, init?: RequestInit): Promise<Blob> {
       throw new Error(detail);
     }
     return res.blob();
+  } catch (err: any) {
+    if (err.name === 'AbortError') throw new Error('Request timed out (120s)');
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchMultipart<T>(url: string, form: FormData): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${API_BASE}${url}`, {
+      method: 'POST',
+      headers,
+      body: form,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      if (res.status === 401) clearAuth();
+      const body = await res.text().catch(() => '');
+      let detail = `API error: ${res.status}`;
+      try { const j = JSON.parse(body); detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail) || detail; } catch {}
+      throw new Error(detail);
+    }
+    return res.json();
   } catch (err: any) {
     if (err.name === 'AbortError') throw new Error('Request timed out (120s)');
     throw err;
@@ -137,6 +166,24 @@ export const api = {
       home_longitude?: number;
       altitude_mode?: string;
     }) => fetchJson<GridResult>('/planning/corridor', { method: 'POST', body: JSON.stringify(data) }),
+    corridorImport: (file: File, fields: {
+      width_left: number;
+      width_right: number;
+      altitude: number;
+      overlap_frontal: number;
+      overlap_lateral: number;
+      altitude_mode: string;
+      camera_id?: string;
+      drone_id?: string;
+      project_id?: string;
+    }) => {
+      const form = new FormData();
+      form.append('file', file);
+      Object.entries(fields).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') form.append(k, String(v));
+      });
+      return fetchMultipart<CorridorImportResponse>('/corridor/import', form);
+    },
     gsd: (data: { altitude: number; camera_id: string }) =>
       fetchJson<{ gsd: number; footprint_width: number; footprint_height: number }>('/planning/gsd', {
         method: 'POST',

@@ -107,9 +107,16 @@ export interface GridResult {
 export interface CorridorGeometry {
   polygon_geojson: GeoJSON.Polygon;
   flight_lines_geojson: GeoJSON.FeatureCollection;
+  centerline_geojson?: GeoJSON.LineString;
   epsg_out: number;
   crs_name: string;
   transformation: string;
+}
+
+export interface CorridorImportResponse extends GridResult {
+  import_format: string;
+  import_source: string;
+  features_found: number;
 }
 
 export interface ExportCompatibility {
