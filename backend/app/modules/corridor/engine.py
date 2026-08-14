@@ -131,7 +131,7 @@ def _build_flight_segments(
 
     segments: list[LineString] = []
     for off in offsets:
-        curve = _as_single_line(center.offset_curve(off, quad_segs=16, join_style="round"))
+        curve = _as_single_line(center.offset_curve(off, join_style="mitre", mitre_limit=2.0))
         if curve is None:
             continue
         inside = curve.intersection(poly)
@@ -344,8 +344,8 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
 
     warnings: list[str] = []
 
-    left = _as_single_line(center.offset_curve(req.width_left, quad_segs=16, join_style="round"))
-    right = _as_single_line(center.offset_curve(-req.width_right, quad_segs=16, join_style="round"))
+    left = _as_single_line(center.offset_curve(req.width_left, join_style="mitre", mitre_limit=2.0))
+    right = _as_single_line(center.offset_curve(-req.width_right, join_style="mitre", mitre_limit=2.0))
     if left is None or right is None:
         raise ValueError("Unable to build corridor offsets (centerline self-intersects or is too tight)")
 

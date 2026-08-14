@@ -146,6 +146,26 @@ def test_api_corridor_closed_ring_matches_open_centerline():
     assert d2["num_lines"] == d1["num_lines"]
 
 
+def test_corridor_linear_joins_no_rounded_arcs():
+    """Corridor offsets must use linear (mitre) joins so flight lines keep
+    their sharp corner vertices instead of rounded arc interpolations."""
+    _ensure_db()
+    cl = {
+        "type": "LineString",
+        "coordinates": [[-3.6000, 37.1800], [-3.5800, 37.1800], [-3.5800, 37.1700]],
+    }
+    resp = client.post(
+        "/api/v1/planning/corridor",
+        json=_req(centerline=cl, width_left=30, width_right=30),
+    )
+    assert resp.status_code == 200, resp.text
+    d = resp.json()
+    lines = d["geometry"]["flight_lines_geojson"]["features"]
+    assert len(lines) >= 2
+    for f in lines:
+        assert len(f["geometry"]["coordinates"]) == 3  # start + corner + end, no arc points
+
+
 def test_boustrophedon_return_line_reversed():
     """The return (odd) flight line must be flown from its far end back to its
     near end, so the drone turns at the corridor end instead of flying back
