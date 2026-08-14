@@ -231,3 +231,38 @@ def test_import_empty_file():
     _ensure_db()
     resp = _import("route.geojson", b"")
     assert resp.status_code == 400
+
+
+# --- parse-only endpoint (no flight plan generated) ------------------------
+
+
+def _parse(filename, data):
+    return client.post(
+        "/api/v1/corridor/parse",
+        files={"file": (filename, data, "application/octet-stream")},
+    )
+
+
+def test_parse_returns_centerline_only():
+    _ensure_db()
+    resp = _parse("route.kmz", build_kmz())
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["import_format"] == "kmz"
+    assert body["centerline"]["type"] == "LineString"
+    assert len(body["centerline"]["coordinates"]) >= 2
+    assert "mission_id" not in body
+    assert "waypoints" not in body
+
+
+def test_parse_api_geopackage():
+    _ensure_db()
+    resp = _parse("route.gpkg", build_geopackage())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["import_format"] == "geopackage"
+
+
+def test_parse_invalid_returns_400():
+    _ensure_db()
+    resp = _parse("route.kml", b"garbage")
+    assert resp.status_code == 400

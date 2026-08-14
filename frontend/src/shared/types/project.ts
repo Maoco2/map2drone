@@ -119,6 +119,14 @@ export interface CorridorImportResponse extends GridResult {
   features_found: number;
 }
 
+export interface CorridorParseResponse {
+  centerline: { type: 'LineString'; coordinates: [number, number][] };
+  import_format: string;
+  import_source: string;
+  features_found: number;
+  warnings: string[];
+}
+
 export interface ExportCompatibility {
   category: string;
   label: string;

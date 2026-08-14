@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { Project, Mission, Drone, Camera, GridResult, CorridorImportResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
+import type { Project, Mission, Drone, Camera, GridResult, CorridorParseResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
 
 const API_BASE = '/api/v1';
 
@@ -166,23 +166,10 @@ export const api = {
       home_longitude?: number;
       altitude_mode?: string;
     }) => fetchJson<GridResult>('/planning/corridor', { method: 'POST', body: JSON.stringify(data) }),
-    corridorImport: (file: File, fields: {
-      width_left: number;
-      width_right: number;
-      altitude: number;
-      overlap_frontal: number;
-      overlap_lateral: number;
-      altitude_mode: string;
-      camera_id?: string;
-      drone_id?: string;
-      project_id?: string;
-    }) => {
+    corridorParse: (file: File) => {
       const form = new FormData();
       form.append('file', file);
-      Object.entries(fields).forEach(([k, v]) => {
-        if (v !== undefined && v !== null && v !== '') form.append(k, String(v));
-      });
-      return fetchMultipart<CorridorImportResponse>('/corridor/import', form);
+      return fetchMultipart<CorridorParseResponse>('/corridor/parse', form);
     },
     gsd: (data: { altitude: number; camera_id: string }) =>
       fetchJson<{ gsd: number; footprint_width: number; footprint_height: number }>('/planning/gsd', {

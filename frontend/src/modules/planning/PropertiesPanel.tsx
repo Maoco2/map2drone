@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/shared/utils/api';
-import { useDrawStore } from '@/modules/map/drawStore';
+import { useDrawStore, nextId } from '@/modules/map/drawStore';
 import type { DrawFeature } from '@/modules/map/drawStore';
+import { useMapStore } from '@/modules/map/store';
 import { useMissionStore } from '@/modules/missions/planningStore';
 import { useSidebarStore } from '@/app/layouts/sidebarStore';
 import { useProjectStore } from '@/modules/projects/store';
@@ -192,33 +193,42 @@ export default function PropertiesPanel() {
       setError(`Unsupported format: .${ext}`);
       return;
     }
-    if (!droneId) {
-      setError('Select a drone first');
-      return;
-    }
-    const drone = drones?.find((d: Drone) => d.id === droneId);
     setImportingFile(true);
     setError(null);
     try {
-      const result = await api.planning.corridorImport(file, {
-        width_left: Number(widthLeft),
-        width_right: Number(widthRight),
-        altitude: Number(altitude),
-        overlap_frontal: Number(overlapFrontal),
-        overlap_lateral: Number(overlapLateral),
-        altitude_mode: altitudeMode,
-        camera_id: drone?.camera_id || undefined,
-        drone_id: droneId,
-        project_id: selectedProjectId || undefined,
+      const parsed = await api.planning.corridorParse(file);
+      const coords = parsed.centerline?.coordinates ?? [];
+      const pts = coords.map((c) => ({ lng: Number(c[0]), lat: Number(c[1]) }));
+      if (pts.length < 2) {
+        setError('No centerline found in the file');
+        return;
+      }
+      const drawStore = useDrawStore.getState();
+      for (const f of drawStore.features) {
+        if (f.type === 'polyline') drawStore.removeFeature(f.id);
+      }
+      drawStore.addFeature({
+        id: nextId(),
+        type: 'polyline',
+        points: pts,
+        completed: true,
       });
-      setGridResult(result);
-      fetchMissions();
+      setGridResult(null);
+      const map = useMapStore.getState().mapRef;
+      if (map) {
+        const lngs = pts.map((p) => p.lng);
+        const lats = pts.map((p) => p.lat);
+        map.fitBounds(
+          [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+          { padding: 80, duration: 800 },
+        );
+      }
     } catch (err: any) {
       setError(err.message || 'Corridor import failed');
     } finally {
       setImportingFile(false);
     }
-  }, [drones, droneId, altitude, overlapFrontal, overlapLateral, altitudeMode, widthLeft, widthRight, selectedProjectId, setGridResult, setError, fetchMissions]);
+  }, [setGridResult, setError]);
 
   const field = (label: string, value: string | number, onChange: (v: any) => void, opts?: { min?: number; max?: number; step?: number }) => (
     <div className="flex items-center gap-2">
@@ -363,9 +373,9 @@ export default function PropertiesPanel() {
               }}
             />
             <div className="text-[10px] px-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-              Import a centerline from KML, KMZ, GeoPackage, GeoJSON or Shapefile (.shp); or draw it with
-              the <b>Polyline</b> tool (〰 icon, above Measure) pressing Enter or double-click to finish, then
-              press Generate.
+              Import shows the centerline on the map (KML, KMZ, GeoPackage, GeoJSON, Shapefile)
+              and zooms to it — the flight plan is generated only when you press Generate. You can
+              also draw it with the <b>Polyline</b> tool (〰 icon, above Measure).
             </div>
           </div>
         )}

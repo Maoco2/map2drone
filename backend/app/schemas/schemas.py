@@ -191,6 +191,14 @@ class CorridorImportResponse(CorridorResponse):
     features_found: int = 0
 
 
+class CorridorParseResponse(BaseModel):
+    centerline: dict
+    import_format: str = ""
+    import_source: str = ""
+    features_found: int = 0
+    warnings: list[str] = []
+
+
 class GSDRequest(BaseModel):
     altitude: float = Field(..., ge=10, le=500)
     camera_id: str

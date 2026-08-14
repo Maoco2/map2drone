@@ -15,6 +15,7 @@ from app.modules.planning.engine import compute_grid, compute_gsd
 from app.schemas.schemas import (
     CameraResponse,
     CorridorImportResponse,
+    CorridorParseResponse,
     CorridorRequest,
     CorridorResponse,
     DroneResponse,
@@ -308,6 +309,27 @@ def calculate_corridor(req: CorridorRequest, db: Session = Depends(get_db)):
         raise HTTPException(400, str(e))
     except Exception as e:
         raise HTTPException(500, f"Corridor computation failed: {str(e)}")
+
+
+@router.post("/corridor/parse", response_model=CorridorParseResponse)
+async def parse_corridor_file(file: UploadFile = File(...)):
+    """Parse a centerline file (KMZ/KML/GeoPackage/GeoJSON/Shapefile) without computing a flight plan."""
+    data = await file.read()
+    if len(data) > 50 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 50 MB)")
+    if not data:
+        raise HTTPException(400, "Empty file")
+    try:
+        fmt, centerline, features_found, warnings = load_centerline(file.filename or "", data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return CorridorParseResponse(
+        centerline={"type": "LineString", "coordinates": centerline},
+        import_format=fmt,
+        import_source=file.filename or "",
+        features_found=features_found,
+        warnings=warnings,
+    )
 
 
 @router.post("/corridor/import", response_model=CorridorImportResponse)
