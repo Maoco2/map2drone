@@ -249,6 +249,11 @@ def calculate_grid(req: GridRequest, db: Session = Depends(get_db)):
                             "drone_id": req.drone_id,
                             "camera_id": req.camera_id,
                             "altitude_mode": req.altitude_mode,
+                            "recommended_speed_ms": result.recommended_speed_ms,
+                            "capture_interval_s": (
+                                result.capture_interval.recommended_interval_s
+                                if result.capture_interval else None
+                            ),
                         }),
                         grid_result_json=json.dumps(result.model_dump()),
                     )
@@ -288,6 +293,11 @@ def _auto_create_corridor_mission(db, req: CorridorRequest, result) -> Optional[
                         "altitude_mode": req.altitude_mode,
                         "width_left": req.width_left,
                         "width_right": req.width_right,
+                        "recommended_speed_ms": result.recommended_speed_ms,
+                        "capture_interval_s": (
+                            result.capture_interval.recommended_interval_s
+                            if result.capture_interval else None
+                        ),
                     }),
                     grid_result_json=json.dumps(result.model_dump()),
                 )
@@ -449,6 +459,7 @@ def _build_mission(req: ExportRequest | MultiExportRequest) -> MissionExportData
         overlap_frontal=req.overlap_frontal,
         overlap_lateral=req.overlap_lateral,
         battery_count=req.battery_count,
+        capture_interval_s=req.capture_interval_s,
     )
 
 

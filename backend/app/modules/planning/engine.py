@@ -7,11 +7,12 @@ Supports terrain-follow (AGL) altitude mode via SRTM DEM.
 """
 
 import math
-from typing import Sequence, Optional
-from app.schemas.schemas import GridRequest, GridResponse, WaypointSchema, GSDRequest, GSDResponse
+from typing import Optional, Sequence
+
+from app.core.photogrammetry.capture_interval import build_capture_interval_block, compute_capture_interval
 from app.models.schemas import Camera, Drone
 from app.modules.planning.elevation import ElevationProvider, create_provider
-
+from app.schemas.schemas import GridRequest, GridResponse, GSDRequest, GSDResponse, WaypointSchema
 
 # ---------------------------------------------------------------------------
 # Camera helpers
@@ -516,6 +517,13 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     battery_minutes = 25
     battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
 
+    # 6b. Universal capture interval recommendation (front overlap -> photo interval)
+    ci = compute_capture_interval(
+        footprint_length_m=fh,
+        front_overlap=req.overlap_frontal,
+        flight_speed_mps=recommended_speed_ms,
+    )
+
     return GridResponse(
         waypoints=waypoints,
         total_distance=round(total_distance, 2),
@@ -531,4 +539,5 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
         sweep_deg=round(sweep_deg, 1),
         num_lines=total_lines,
         waypoint_mode=wp_mode,
+        capture_interval=build_capture_interval_block(ci),
     )

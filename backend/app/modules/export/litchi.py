@@ -1,12 +1,19 @@
 from __future__ import annotations
-from typing import Sequence
+
+from typing import Optional, Sequence
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult, ValidationError,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
-    has_elevation_data, has_terrain_following,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
+    ValidationError,
+    ValidationResult,
+    has_elevation_data,
+    has_terrain_following,
 )
-from .models import MissionExportData, ExportWaypoint
+from .models import ExportWaypoint, MissionExportData
 
 CSV_HEADER = (
     "latitude,longitude,altitude(m),heading(deg),curvesize(m),rotationdir,"
@@ -51,6 +58,7 @@ def generate_litchi_csv(
     speed_ms: float = 10.0,
     photo_spacing: float = 0,
     altitude_mode: str = "photo",
+    capture_interval_s: Optional[int] = None,
 ) -> str:
     rows = [CSV_HEADER]
     is_interval_mode = altitude_mode in ("takeoff", "ground")
@@ -64,8 +72,12 @@ def generate_litchi_csv(
                 hdg_diff = 360 - hdg_diff
             same_line = hdg_diff <= 45
             if same_line:
-                dist_interval = round(photo_spacing, 1)
-                time_interval = round(photo_spacing / speed_ms, 1) if speed_ms > 0 else -1.0
+                if capture_interval_s and capture_interval_s > 0:
+                    time_interval = float(capture_interval_s)
+                    dist_interval = round(capture_interval_s * speed_ms, 1)
+                else:
+                    dist_interval = round(photo_spacing, 1)
+                    time_interval = round(photo_spacing / speed_ms, 1) if speed_ms > 0 else -1.0
             else:
                 dist_interval = -1.0
                 time_interval = -1.0
@@ -145,6 +157,7 @@ class LitchiExporter(MissionExporter):
         csv = generate_litchi_csv(
             mission.waypoints, mission.speed_ms,
             mission.photo_spacing, mission.altitude_mode,
+            mission.capture_interval_s,
         )
         return ExportResult(
             data=csv,

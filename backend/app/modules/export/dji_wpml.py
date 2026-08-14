@@ -1,11 +1,21 @@
 from __future__ import annotations
+
 import xml.etree.ElementTree as ET
+from typing import Optional
 from xml.dom import minidom
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult, ValidationError,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
-    has_elevation_data, has_heading_per_wp, has_multiple_actions, has_gimbal,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
+    ValidationError,
+    ValidationResult,
+    has_elevation_data,
+    has_gimbal,
+    has_heading_per_wp,
+    has_multiple_actions,
 )
 from .models import MissionExportData
 
@@ -76,7 +86,8 @@ def _build_xml(mission: MissionExportData) -> str:
             is_scan_exit = hdg_diff > 45
 
         _add_action_group(wp_elem, wp, is_interval_mode, is_scan_entry, is_scan_exit,
-                          mission.photo_spacing, mission.speed_ms)
+                          mission.photo_spacing, mission.speed_ms,
+                          mission.capture_interval_s)
 
     raw = ET.tostring(root, encoding="unicode")
     return minidom.parseString(raw).toprettyxml(indent="  ")
@@ -84,7 +95,8 @@ def _build_xml(mission: MissionExportData) -> str:
 
 def _add_action_group(parent: ET.Element, wp: ExportWaypoint,
                       is_interval_mode: bool, is_scan_entry: bool, is_scan_exit: bool,
-                      photo_spacing: float, speed_ms: float) -> None:
+                      photo_spacing: float, speed_ms: float,
+                      capture_interval_s: Optional[int] = None) -> None:
     ag = ET.SubElement(parent, "actionGroup")
     ag_id = ET.SubElement(ag, "actionGroupIndex")
     ag_id.text = "1"
@@ -96,7 +108,10 @@ def _add_action_group(parent: ET.Element, wp: ExportWaypoint,
     act_list = ET.SubElement(ag, "actionList")
 
     if is_interval_mode and is_scan_entry and photo_spacing > 0 and speed_ms > 0:
-        interval_ms = int(photo_spacing / speed_ms * 1000)
+        if capture_interval_s and capture_interval_s > 0:
+            interval_ms = int(capture_interval_s * 1000)
+        else:
+            interval_ms = int(photo_spacing / speed_ms * 1000)
         _add_action(act_list, 15, float(interval_ms))
     elif is_interval_mode and is_scan_exit:
         _add_action(act_list, 16, 0)

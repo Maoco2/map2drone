@@ -98,5 +98,6 @@ export function buildExportData(gridResult: GridResult, projectName: string) {
     line_spacing: gridResult.line_spacing ?? 0,
     photo_spacing: gridResult.photo_spacing ?? 0,
     battery_count: gridResult.battery_count ?? 0,
+    capture_interval_s: gridResult.capture_interval?.recommended_interval_s ?? null,
   };
 }

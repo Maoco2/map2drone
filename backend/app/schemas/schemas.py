@@ -105,6 +105,24 @@ class WaypointSchema(BaseModel):
     agl: Optional[float] = None
 
 
+class CaptureIntervalBlock(BaseModel):
+    """Photo capture interval recommendation from the universal engine.
+
+    `recommended_interval_s` is the operational value and is ALWAYS an integer
+    number of seconds. `ideal_interval_s` is informational only. Overlap values
+    are expressed in percent (0-100).
+    """
+    status: str = "ERROR"
+    required_photo_spacing_m: Optional[float] = None
+    ideal_interval_s: Optional[float] = None
+    recommended_interval_s: Optional[int] = None
+    actual_photo_spacing_m: Optional[float] = None
+    effective_front_overlap: Optional[float] = None
+    required_front_overlap: Optional[float] = None
+    speed_mps: Optional[float] = None
+    maximum_speed_for_1s: Optional[float] = None
+
+
 class GridRequest(BaseModel):
     polygon: dict
     altitude: float = Field(..., ge=10, le=500)
@@ -137,6 +155,7 @@ class GridResponse(BaseModel):
     sweep_deg: float = 0
     num_lines: int = 0
     waypoint_mode: str = "photo"
+    capture_interval: Optional[CaptureIntervalBlock] = None
 
 
 class CorridorRequest(BaseModel):
@@ -183,6 +202,7 @@ class CorridorResponse(BaseModel):
     corridor_area_m2: float = 0
     geometry: CorridorGeometry = CorridorGeometry()
     warnings: list[str] = []
+    capture_interval: Optional[CaptureIntervalBlock] = None
 
 
 class CorridorImportResponse(CorridorResponse):
@@ -233,6 +253,7 @@ class CameraResponse(BaseModel):
     focal_length_mm: float
     pixel_size_um: float
     shutter_speed_s: float = 0.001
+    shutter_type: str = "electronic"
     model_config = {"from_attributes": True}
 
 
@@ -289,6 +310,7 @@ class ExportRequest(BaseModel):
     overlap_frontal: float = 75
     overlap_lateral: float = 65
     battery_count: int = 0
+    capture_interval_s: Optional[int] = None
 
 
 class MultiExportRequest(BaseModel):
@@ -313,3 +335,4 @@ class MultiExportRequest(BaseModel):
     overlap_frontal: float = 75
     overlap_lateral: float = 65
     battery_count: int = 0
+    capture_interval_s: Optional[int] = None

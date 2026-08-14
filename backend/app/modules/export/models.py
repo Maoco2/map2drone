@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -81,3 +83,4 @@ class MissionExportData(BaseModel):
     line_spacing: float = 0
     photo_spacing: float = 0
     battery_count: int = 0
+    capture_interval_s: Optional[int] = None

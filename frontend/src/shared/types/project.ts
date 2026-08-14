@@ -80,6 +80,22 @@ export interface Camera {
   image_height_px: number;
   focal_length_mm: number;
   pixel_size_um: number;
+  shutter_speed_s?: number;
+  shutter_type?: string;
+}
+
+export type CaptureIntervalStatus = 'VALID' | 'WARNING' | 'INCOMPATIBLE' | 'ERROR';
+
+export interface CaptureIntervalResult {
+  status: CaptureIntervalStatus;
+  required_photo_spacing_m?: number;
+  ideal_interval_s?: number;
+  recommended_interval_s?: number;
+  actual_photo_spacing_m?: number;
+  effective_front_overlap?: number;
+  required_front_overlap?: number;
+  speed_mps?: number;
+  maximum_speed_for_1s?: number;
 }
 
 export interface GridResult {
@@ -102,6 +118,7 @@ export interface GridResult {
   corridor_area_m2?: number;
   geometry?: CorridorGeometry;
   warnings?: string[];
+  capture_interval?: CaptureIntervalResult;
 }
 
 export interface CorridorGeometry {

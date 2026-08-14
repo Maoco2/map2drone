@@ -9,6 +9,8 @@ import { useSidebarStore } from '@/app/layouts/sidebarStore';
 import { useProjectStore } from '@/modules/projects/store';
 import { useMissionListStore } from '@/modules/missions/missionListStore';
 import type { Drone, Camera } from '@/shared/types/project';
+import { computeLiveCapture } from '@/shared/utils/captureInterval';
+import CaptureIntervalCard from './CaptureIntervalCard';
 import AdSlot from '@/shared/components/AdSlot';
 
 function getPolygonPoints(f: DrawFeature): { lng: number; lat: number }[] {
@@ -95,6 +97,23 @@ export default function PropertiesPanel() {
   const lastFeature = features.filter(
     (f) => (f.type === 'polygon' || f.type === 'rectangle' || f.type === 'circle') && f.completed && f.points.length >= 2
   ).pop();
+
+  const drone = useMemo(() => drones?.find((d: Drone) => d.id === droneId), [drones, droneId]);
+  const camera = useMemo(
+    () => cameras?.find((c: Camera) => c.id === drone?.camera_id),
+    [cameras, drone],
+  );
+
+  // Lightweight live mirror of the backend capture-interval engine (no GIS calls).
+  const liveCapture = useMemo(() => {
+    if (!camera || !drone) return null;
+    return computeLiveCapture({
+      altitude: Number(altitude),
+      camera,
+      drone,
+      frontOverlap: Number(overlapFrontal),
+    });
+  }, [camera, drone, altitude, overlapFrontal]);
 
   const polygonPoints = useMemo(() => {
     if (!lastFeature) return null;
@@ -524,6 +543,16 @@ export default function PropertiesPanel() {
                   <div key={i}>⚠ {w}</div>
                 ))}
               </div>
+            )}
+
+            {liveCapture && (
+              <CaptureIntervalCard
+                result={liveCapture.result}
+                gsd={liveCapture.gsd}
+                footprintLengthM={liveCapture.footprintLength}
+                frontOverlap={Number(overlapFrontal)}
+                lateralOverlap={Number(overlapLateral)}
+              />
             )}
 
             <button

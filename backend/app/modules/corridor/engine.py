@@ -18,6 +18,7 @@ from typing import Optional
 from pyproj import CRS, Transformer
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, Point, Polygon
 
+from app.core.photogrammetry.capture_interval import build_capture_interval_block, compute_capture_interval
 from app.models.schemas import Camera, Drone
 from app.modules.planning.elevation import ElevationProvider, create_provider
 from app.modules.planning.engine import calc_footprint, calc_gsd
@@ -417,6 +418,13 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     battery_minutes = float(drone.flight_time_min * 0.8) if drone and drone.flight_time_min else 25.0
     battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
 
+    # Universal capture interval recommendation (front overlap -> photo interval)
+    ci = compute_capture_interval(
+        footprint_length_m=fh,
+        front_overlap=req.overlap_frontal,
+        flight_speed_mps=recommended_speed_ms,
+    )
+
     return CorridorResponse(
         waypoints=waypoints,
         total_distance=round(total_distance, 2),
@@ -442,4 +450,5 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
             transformation=f"EPSG:4326 -> EPSG:{epsg} (pyproj/shapely projected geometry)",
         ),
         warnings=warnings,
+        capture_interval=build_capture_interval_block(ci),
     )
