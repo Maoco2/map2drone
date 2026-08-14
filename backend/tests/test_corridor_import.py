@@ -39,6 +39,25 @@ def build_kmz():
     return buf.getvalue()
 
 
+def build_kml_ring():
+    ring = LINKS + [LINKS[0]]  # closed ring: last == first
+    cs = " ".join(f"{p[0]},{p[1]},0" for p in ring)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<kml xmlns='http://www.opengis.net/kml/2.2'>"
+        "<Document><Placemark><name>ring</name><LinearRing>"
+        f"<coordinates>{cs}</coordinates>"
+        "</LinearRing></Placemark></Document></kml>"
+    )
+
+
+def build_kmz_ring():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("doc.kml", build_kml_ring())
+    return buf.getvalue()
+
+
 def build_shapefile():
     import shapefile
 
@@ -140,6 +159,15 @@ def test_parse_kml_and_kmz():
     assert fmt == "kml" and line == LINKS and n == 1
     fmt2, line2, n2, _ = load_centerline("a.kmz", build_kmz())
     assert fmt2 == "kmz" and line2 == LINKS and n2 == 1
+
+
+def test_parse_closed_ring_deduplicates_closing_vertex():
+    fmt, line, n, warnings = load_centerline("ring.kml", build_kml_ring().encode())
+    assert fmt == "kml"
+    assert len(line) == 3  # 4 ring coords minus the duplicate closing point
+    assert line[0] == LINKS[0]
+    assert n == 1
+    assert any("closed ring" in w for w in warnings)
 
 
 def test_parse_shapefile():
@@ -253,6 +281,17 @@ def test_parse_returns_centerline_only():
     assert len(body["centerline"]["coordinates"]) >= 2
     assert "mission_id" not in body
     assert "waypoints" not in body
+
+
+def test_parse_api_closed_ring_dedup():
+    _ensure_db()
+    resp = _parse("ring.kmz", build_kmz_ring())
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    coords = body["centerline"]["coordinates"]
+    assert len(coords) == 3
+    assert coords[0] == LINKS[0]
+    assert any("closed ring" in w for w in body["warnings"])
 
 
 def test_parse_api_geopackage():

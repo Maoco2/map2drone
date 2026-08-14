@@ -25,6 +25,11 @@ class FakeProvider:
         return [100.0 + (i % 7) * 3.0 for i in range(len(points))]
 
 
+class ZeroProvider:
+    def get_elevations(self, points):
+        return [0.0] * len(points)
+
+
 def _req(**kw):
     base = {
         "centerline": CENTERLINE,
@@ -109,6 +114,33 @@ def test_api_corridor_terrain():
     for wp in data["waypoints"]:
         assert wp["agl"] == 100
         assert wp["elevation_msnm"] > 0
+
+
+def test_api_corridor_terrain_dem_unavailable_falls_back_with_warning():
+    _ensure_db()
+    with patch("app.modules.corridor.engine.create_provider", return_value=ZeroProvider()):
+        resp = client.post("/api/v1/planning/corridor", json=_req(altitude_mode="ground"))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["waypoint_mode"] == "terrain"
+    assert len(data["waypoints"]) >= 2
+    assert any("Elevation data unavailable" in w for w in data["warnings"])
+
+
+def test_api_corridor_closed_ring_matches_open_centerline():
+    _ensure_db()
+    open_cl = {"type": "LineString", "coordinates": CENTERLINE["coordinates"]}
+    closed_cl = {
+        "type": "LineString",
+        "coordinates": CENTERLINE["coordinates"] + [CENTERLINE["coordinates"][0]],
+    }
+    r1 = client.post("/api/v1/planning/corridor", json=_req(centerline=open_cl, altitude_mode="photo"))
+    r2 = client.post("/api/v1/planning/corridor", json=_req(centerline=closed_cl, altitude_mode="photo"))
+    assert r1.status_code == 200 and r2.status_code == 200
+    d1, d2 = r1.json(), r2.json()
+    assert len(d2["waypoints"]) == len(d1["waypoints"])
+    assert d2["corridor_length_m"] == d1["corridor_length_m"]
+    assert d2["num_lines"] == d1["num_lines"]
 
 
 def test_api_corridor_short_centerline():

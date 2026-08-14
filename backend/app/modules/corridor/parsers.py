@@ -270,6 +270,19 @@ _PARSERS = {
 }
 
 
+_CLOSING_EPS_DEG = 1e-9
+
+
+def _dedup_closing_point(coords: list[list[float]]) -> list[list[float]]:
+    """Drop a trailing coordinate equal to the first (closed ring → open centerline)."""
+    if len(coords) >= 3:
+        first = coords[0]
+        last = coords[-1]
+        if abs(first[0] - last[0]) <= _CLOSING_EPS_DEG and abs(first[1] - last[1]) <= _CLOSING_EPS_DEG:
+            return coords[:-1]
+    return coords
+
+
 def load_centerline(filename: str, data: bytes) -> tuple[str, list[list[float]], int, list[str]]:
     """Detect format, parse lines and return (fmt, best_centerline, features_found, warnings)."""
     fmt = detect_format(filename, data)
@@ -283,4 +296,10 @@ def load_centerline(filename: str, data: bytes) -> tuple[str, list[list[float]],
     best = max(lines, key=len)
     if len(lines) > 1:
         warnings.append(f"{len(lines)} line geometries found in the file; using the longest one")
-    return fmt, best, len(lines), warnings
+    cleaned = _dedup_closing_point(best)
+    if len(cleaned) < len(best):
+        warnings.append(
+            f"Centerline is a closed ring; removed the duplicate closing vertex "
+            f"({len(best)} -> {len(cleaned)} vertices)"
+        )
+    return fmt, cleaned, len(lines), warnings

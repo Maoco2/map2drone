@@ -38,6 +38,13 @@ def _extract_centerline_coords(centerline: dict) -> list[list[float]]:
             cleaned.append([float(p[0]), float(p[1])])
     if len(cleaned) < 2:
         raise ValueError("Centerline must have at least 2 valid coordinate pairs")
+    if len(cleaned) >= 3:
+        first = cleaned[0]
+        last = cleaned[-1]
+        if abs(first[0] - last[0]) <= 1e-9 and abs(first[1] - last[1]) <= 1e-9:
+            cleaned = cleaned[:-1]
+    if len(cleaned) < 2:
+        raise ValueError("Centerline must have at least 2 valid coordinate pairs")
     return cleaned
 
 
@@ -178,6 +185,7 @@ def _terrain_waypoints(
     sample_interval_m: float,
     elevation_threshold: float,
     vertex_tolerance_m: float,
+    warnings: Optional[list[str]] = None,
 ) -> tuple[list[WaypointSchema], float]:
     """Ground mode: vertex waypoints at DEM break points + flight-line vertices."""
     if not segments:
@@ -214,6 +222,11 @@ def _terrain_waypoints(
     elevations = elevation_provider.get_elevations(sample_pts) if elevation_provider else [0.0] * len(sample_pts)
 
     if not elevations or max(elevations) <= 0:
+        if warnings is not None:
+            warnings.append(
+                "Elevation data unavailable — Ground (AGL) mode used vertex waypoints "
+                "at flight-line corners instead of terrain-adjusted samples."
+            )
         return _vertex_waypoints(segments, altitude, inverse, vertex_tolerance_m), 0.0
 
     ref_ground = elevations[0]
@@ -354,7 +367,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
         waypoints, _ = _terrain_waypoints(
             segments, req.altitude, inverse, elevation_provider,
-            dem_sample_interval, dem_elevation_threshold, tol,
+            dem_sample_interval, dem_elevation_threshold, tol, warnings,
         )
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
 
