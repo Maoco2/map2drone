@@ -16,7 +16,7 @@ import math
 from typing import Optional
 
 from pyproj import CRS, Transformer
-from shapely.geometry import GeometryCollection, LineString, MultiLineString, Polygon
+from shapely.geometry import GeometryCollection, LineString, MultiLineString, Point, Polygon
 
 from app.models.schemas import Camera, Drone
 from app.modules.planning.elevation import ElevationProvider, create_provider
@@ -115,15 +115,27 @@ def _photo_waypoints(
     altitude: float,
     inverse: Transformer,
     photo_spacing_m: float,
-) -> list[WaypointSchema]:
-    """One waypoint per photo position (action_type=1)."""
+    vertex_tolerance_m: float,
+) -> tuple[list[WaypointSchema], int]:
+    """Photo waypoints plus one waypoint at every flight-line vertex.
+
+    Adding the vertices makes the corridor outline (each flight line's shape)
+    appear when the mission is exported to third-party software.
+    """
     wps: list[WaypointSchema] = []
+    photo_count = 0
     for idx, seg in enumerate(segments):
         reverse = idx % 2 == 1
         n = max(1, int(seg.length / photo_spacing_m))
+        positions: dict[float, int] = {}
         for j in range(n):
-            frac = (j + 0.5) / n
-            d = frac * seg.length
+            d = (j + 0.5) * seg.length / n
+            positions[round(d, 3)] = 1
+        for pt in seg.simplify(vertex_tolerance_m, preserve_topology=False).coords:
+            key = round(seg.project(Point(pt)), 3)
+            positions.setdefault(key, -1)
+        for d in sorted(positions):
+            action = positions[d]
             pt = seg.interpolate(d)
             d2 = min(d + 1.0, seg.length)
             pt2 = seg.interpolate(d2)
@@ -131,8 +143,10 @@ def _photo_waypoints(
             if reverse:
                 hdg = (hdg + 180.0) % 360.0
             lon, lat = inverse.transform(pt.x, pt.y)
-            wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=altitude, heading=hdg, action_type=1))
-    return wps
+            wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=altitude, heading=hdg, action_type=action))
+            if action == 1:
+                photo_count += 1
+    return wps, photo_count
 
 
 def _vertex_waypoints(
@@ -163,20 +177,29 @@ def _terrain_waypoints(
     elevation_provider: Optional[ElevationProvider],
     sample_interval_m: float,
     elevation_threshold: float,
+    vertex_tolerance_m: float,
 ) -> tuple[list[WaypointSchema], float]:
-    """Ground mode: vertex waypoints + additional waypoints at DEM break points."""
+    """Ground mode: vertex waypoints at DEM break points + flight-line vertices."""
     if not segments:
         return [], 0.0
 
-    dem_samples: list[tuple[float, float, float]] = []  # (lat, lng, heading)
+    samples: list[tuple[float, float, float, bool]] = []  # (lat, lng, heading, forced)
     sample_pts: list[tuple[float, float]] = []
+    seg_counts: list[int] = []
 
     for idx, seg in enumerate(segments):
         reverse = idx % 2 == 1
         n = max(2, int(seg.length / sample_interval_m))
+        positions: dict[float, bool] = {}
         for j in range(n):
-            frac = j / (n - 1)
-            d = frac * seg.length
+            d = j * seg.length / (n - 1)
+            positions[round(d, 3)] = False
+        for pt in seg.simplify(vertex_tolerance_m, preserve_topology=False).coords:
+            key = round(seg.project(Point(pt)), 3)
+            positions.setdefault(key, True)
+        start = len(samples)
+        for d in sorted(positions):
+            forced = positions[d]
             pt = seg.interpolate(d)
             lon, lat = inverse.transform(pt.x, pt.y)
             d2 = min(d + 1.0, seg.length)
@@ -184,30 +207,27 @@ def _terrain_waypoints(
             hdg = _polyline_local_heading((pt.x, pt.y), (pt2.x, pt2.y))
             if reverse:
                 hdg = (hdg + 180.0) % 360.0
-            dem_samples.append((lat, lon, hdg))
+            samples.append((lat, lon, hdg, forced))
             sample_pts.append((lat, lon))
+        seg_counts.append(len(samples) - start)
 
     elevations = elevation_provider.get_elevations(sample_pts) if elevation_provider else [0.0] * len(sample_pts)
 
     if not elevations or max(elevations) <= 0:
-        return _vertex_waypoints(segments, altitude, inverse, 15.0), 0.0
+        return _vertex_waypoints(segments, altitude, inverse, vertex_tolerance_m), 0.0
 
     ref_ground = elevations[0]
     wps: list[WaypointSchema] = []
-    sample_idx = 0
-
-    for seg in segments:
-        n = max(2, int(seg.length / sample_interval_m))
-        last_break_elev = elevations[sample_idx]
-        for j in range(n):
-            lat, lng, hdg = dem_samples[sample_idx]
-            elev = elevations[sample_idx]
+    base = 0
+    for count in seg_counts:
+        last_break_elev = elevations[base]
+        for k in range(count):
+            lat, lng, hdg, forced = samples[base]
+            elev = elevations[base]
             adj_alt = altitude + (elev - ref_ground)
-            sample_idx += 1
-
-            if j != 0 and j != n - 1 and abs(elev - last_break_elev) <= elevation_threshold:
+            if not forced and k != 0 and k != count - 1 and abs(elev - last_break_elev) <= elevation_threshold:
+                base += 1
                 continue
-
             wps.append(WaypointSchema(
                 latitude=lat, longitude=lng,
                 altitude=adj_alt, heading=hdg,
@@ -215,7 +235,8 @@ def _terrain_waypoints(
                 elevation_msnm=elev,
                 agl=altitude,
             ))
-            if j != n - 1:
+            base += 1
+            if k != count - 1:
                 last_break_elev = elev
 
     return wps, ref_ground
@@ -323,16 +344,17 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         dem_elevation_threshold = max(1.0, min(5.0, res * 0.17))
 
     if wp_mode == "photo":
-        waypoints = _photo_waypoints(segments, req.altitude, inverse, photo_spacing_m)
-        photo_count = len(waypoints)
+        vertex_tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
+        waypoints, photo_count = _photo_waypoints(segments, req.altitude, inverse, photo_spacing_m, vertex_tol)
     elif wp_mode == "vertex":
         tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
         waypoints = _vertex_waypoints(segments, req.altitude, inverse, tol)
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
     else:  # terrain
+        tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
         waypoints, _ = _terrain_waypoints(
             segments, req.altitude, inverse, elevation_provider,
-            dem_sample_interval, dem_elevation_threshold,
+            dem_sample_interval, dem_elevation_threshold, tol,
         )
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
 

@@ -71,9 +71,32 @@ def test_api_corridor_photo():
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert data["waypoint_mode"] == "photo"
-    assert data["photo_count"] == len(data["waypoints"])
+    assert data["photo_count"] == sum(1 for wp in data["waypoints"] if wp["action_type"] == 1)
+    assert data["photo_count"] <= len(data["waypoints"])
+    # flight-line vertices (corridor outline) must exist as navigation waypoints
+    assert any(wp["action_type"] == -1 for wp in data["waypoints"])
     for wp in data["waypoints"]:
-        assert wp["action_type"] == 1
+        assert wp["action_type"] in (1, -1)
+
+
+def test_api_corridor_photo_includes_flight_line_vertices():
+    _ensure_db()
+    resp = client.post("/api/v1/planning/corridor", json=_req(altitude_mode="photo"))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    line_coords = data["geometry"]["flight_lines_geojson"]["features"][0]["geometry"]["coordinates"]
+    first = line_coords[0]
+    last = line_coords[-1]
+    wps = data["waypoints"]
+    tol = 0.0005
+    assert any(
+        abs(wp["longitude"] - first[0]) < tol and abs(wp["latitude"] - first[1]) < tol
+        for wp in wps
+    )
+    assert any(
+        abs(wp["longitude"] - last[0]) < tol and abs(wp["latitude"] - last[1]) < tol
+        for wp in wps
+    )
 
 
 def test_api_corridor_terrain():
