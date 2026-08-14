@@ -169,14 +169,15 @@ def _photo_waypoints(
         for pt in _path_vertices(seg):
             key = round(seg.project(Point(pt)), 3)
             positions.setdefault(key, -1)
-        for d in sorted(positions):
+        for d in sorted(positions, reverse=reverse):
             action = positions[d]
             pt = seg.interpolate(d)
-            d2 = min(d + 1.0, seg.length)
+            if reverse:
+                d2 = max(d - 1.0, 0.0)
+            else:
+                d2 = min(d + 1.0, seg.length)
             pt2 = seg.interpolate(d2)
             hdg = _polyline_local_heading((pt.x, pt.y), (pt2.x, pt2.y))
-            if reverse:
-                hdg = (hdg + 180.0) % 360.0
             lon, lat = inverse.transform(pt.x, pt.y)
             wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=altitude, heading=hdg, action_type=action))
             if action == 1:
@@ -231,15 +232,16 @@ def _terrain_waypoints(
             key = round(seg.project(Point(pt)), 3)
             positions.setdefault(key, True)
         start = len(samples)
-        for d in sorted(positions):
+        for d in sorted(positions, reverse=reverse):
             forced = positions[d]
             pt = seg.interpolate(d)
             lon, lat = inverse.transform(pt.x, pt.y)
-            d2 = min(d + 1.0, seg.length)
+            if reverse:
+                d2 = max(d - 1.0, 0.0)
+            else:
+                d2 = min(d + 1.0, seg.length)
             pt2 = seg.interpolate(d2)
             hdg = _polyline_local_heading((pt.x, pt.y), (pt2.x, pt2.y))
-            if reverse:
-                hdg = (hdg + 180.0) % 360.0
             samples.append((lat, lon, hdg, forced))
             sample_pts.append((lat, lon))
         seg_counts.append(len(samples) - start)

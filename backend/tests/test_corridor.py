@@ -146,6 +146,39 @@ def test_api_corridor_closed_ring_matches_open_centerline():
     assert d2["num_lines"] == d1["num_lines"]
 
 
+def test_boustrophedon_return_line_reversed():
+    """The return (odd) flight line must be flown from its far end back to its
+    near end, so the drone turns at the corridor end instead of flying back
+    over the first line."""
+    _ensure_db()
+    cl = {"type": "LineString", "coordinates": [[-3.6000, 37.1800], [-3.5600, 37.1800]]}
+    base = {
+        "centerline": cl,
+        "width_left": 40, "width_right": 40,
+        "altitude": 100,
+        "overlap_frontal": 75, "overlap_lateral": 65,
+        "camera_id": "cam-1-20mp",
+    }
+    for am in ("photo", "ground"):
+        resp = client.post("/api/v1/planning/corridor", json={**base, "altitude_mode": am})
+        assert resp.status_code == 200, resp.text
+        d = resp.json()
+        lines = d["geometry"]["flight_lines_geojson"]["features"]
+        assert len(lines) >= 2
+        l0end = lines[0]["geometry"]["coordinates"][-1]
+        l1far = lines[1]["geometry"]["coordinates"][-1]
+        wps = d["waypoints"]
+
+        def near(p, q, tol=1e-4):
+            return abs(p["longitude"] - q[0]) < tol and abs(p["latitude"] - q[1]) < tol
+
+        idx = next(i for i, w in enumerate(wps) if near(w, l0end))
+        assert near(wps[idx + 1], l1far), (
+            f"{d['waypoint_mode']}: return line must start at its far end "
+            f"(boustrophedon), got {wps[idx + 1]['longitude']},{wps[idx + 1]['latitude']}"
+        )
+
+
 def test_vertex_waypoints_kept_at_minimal_direction_change():
     """A waypoint must exist at every real vertex, even a tiny angle change."""
     fwd = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(32630), always_xy=True)
