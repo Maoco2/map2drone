@@ -22,6 +22,27 @@ const DEFAULT_MIN_INTERVAL_S = 1.0;
 const DEFAULT_MAX_INTERVAL_S = 60.0;
 const WARNING_RATIO = 1.25;
 const EPS = 1e-9;
+const MIN_PLAUSIBLE_AGL_FLOOR_M = 1.0;
+
+/** Mirrors backend `compute_minimum_plausible_agl` (terrain-follow mode). */
+export function computeMinimumPlausibleAgl(
+  requestedAglM: number,
+  groundElevations?: (number | null | undefined)[],
+  fallbackAglM?: number,
+): number {
+  const valid = (groundElevations ?? []).filter(
+    (e): e is number => e !== null && e !== undefined && Number.isFinite(e) && e > 0,
+  );
+  let value: number;
+  if (valid.length === 0) {
+    value = fallbackAglM !== undefined ? fallbackAglM : requestedAglM;
+  } else {
+    const refGround = valid[0];
+    const maxRise = Math.max(0, Math.max(...valid) - refGround);
+    value = requestedAglM - maxRise;
+  }
+  return Math.max(value, MIN_PLAUSIBLE_AGL_FLOOR_M);
+}
 
 export function calcGsd(altitudeM: number, focalLengthMm: number, pixelSizeUm: number): number {
   return (altitudeM * pixelSizeUm) / (focalLengthMm * 10);
@@ -124,14 +145,20 @@ export interface LiveCapture {
  * Chain of camera -> footprint -> speed -> capture interval, mirroring the
  * backend planning engine. Single shared helper for Area Grid, Linear Corridor
  * and the capture card (no per-variant duplication).
+ *
+ * When Terrain Following is enabled `groundElevations` lets the helper apply
+ * the same conservative minimum-footprint rule as the backend; without elevation
+ * data it falls back to the requested altitude (the safest available estimate).
  */
 export function computeLiveCapture(opts: {
   altitude: number;
   camera: Camera;
   drone?: Drone;
   frontOverlap: number;
+  groundElevations?: (number | null | undefined)[];
 }): LiveCapture {
-  const gsd = calcGsd(opts.altitude, opts.camera.focal_length_mm, opts.camera.pixel_size_um);
+  const minAgl = computeMinimumPlausibleAgl(opts.altitude, opts.groundElevations);
+  const gsd = calcGsd(minAgl, opts.camera.focal_length_mm, opts.camera.pixel_size_um);
   const [footprintWidth, footprintLength] = calcFootprint(gsd, opts.camera.image_width_px, opts.camera.image_height_px);
   const speedMps = calcRecommendedSpeedMps(gsd, opts.camera, opts.drone?.max_speed_ms);
   const result = computeCaptureInterval(footprintLength, opts.frontOverlap, speedMps);

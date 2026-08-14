@@ -8,6 +8,7 @@ import {
   calcGsd,
   computeCaptureInterval,
   computeLiveCapture,
+  computeMinimumPlausibleAgl,
 } from './captureInterval';
 import type { Camera, Drone } from '@/shared/types/project';
 
@@ -128,6 +129,70 @@ describe('calcGsd / computeLiveCapture', () => {
     const vShutter = (gsd / 100) / (2 * 0.001) * 0.5;
     expect(live.speedMps).toBeCloseTo(Math.min(vShutter, 21), 3);
     expect(live.result.recommended_interval_s).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('computeMinimumPlausibleAgl (terrain-follow conservative rule)', () => {
+  it('constant terrain keeps the nominal AGL', () => {
+    expect(computeMinimumPlausibleAgl(100, [600, 600, 600])).toBeCloseTo(100);
+  });
+
+  it('terrain rising above the reference reduces the minimum AGL', () => {
+    expect(computeMinimumPlausibleAgl(100, [600, 620, 640])).toBeCloseTo(60);
+  });
+
+  it('terrain falling below the reference keeps the nominal AGL', () => {
+    expect(computeMinimumPlausibleAgl(100, [640, 620, 600])).toBeCloseTo(100);
+  });
+
+  it('no elevations falls back to the requested AGL', () => {
+    expect(computeMinimumPlausibleAgl(100, [])).toBeCloseTo(100);
+    expect(computeMinimumPlausibleAgl(100, undefined, 80)).toBeCloseTo(80);
+  });
+
+  it('all-zero elevations (DEM unavailable) fall back to the requested AGL', () => {
+    expect(computeMinimumPlausibleAgl(100, [0, 0, 0])).toBeCloseTo(100);
+  });
+
+  it('never dips below the 1 m floor', () => {
+    expect(computeMinimumPlausibleAgl(50, [600, 900])).toBeCloseTo(1);
+  });
+
+  it('shrinks the live footprint/interval vs nominal (mirrors backend)', () => {
+    const camera: Camera = {
+      id: 'c1',
+      name: 'Test',
+      sensor_width_mm: 13.2,
+      sensor_height_mm: 8.8,
+      image_width_px: 5472,
+      image_height_px: 3648,
+      focal_length_mm: 8.8,
+      pixel_size_um: 2.41,
+      shutter_speed_s: 0.001,
+      shutter_type: 'electronic',
+    };
+    const drone: Drone = {
+      id: 'd1',
+      name: 'Test',
+      manufacturer: 'T',
+      weight_kg: 1,
+      max_speed_ms: 21,
+      flight_time_min: 45,
+      max_altitude_m: 5000,
+      camera_id: 'c1',
+    };
+    const nominal = computeLiveCapture({ altitude: 100, camera, drone, frontOverlap: 75 });
+    const conservative = computeLiveCapture({
+      altitude: 100,
+      camera,
+      drone,
+      frontOverlap: 75,
+      groundElevations: [600, 620, 640],
+    });
+    expect(conservative.footprintLength).toBeLessThan(nominal.footprintLength);
+    expect((conservative.result.recommended_interval_s ?? Infinity)).toBeLessThanOrEqual(
+      nominal.result.recommended_interval_s ?? Infinity,
+    );
   });
 });
 

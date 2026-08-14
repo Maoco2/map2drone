@@ -9,7 +9,11 @@ Supports terrain-follow (AGL) altitude mode via SRTM DEM.
 import math
 from typing import Optional, Sequence
 
-from app.core.photogrammetry.capture_interval import build_capture_interval_block, compute_capture_interval
+from app.core.photogrammetry.capture_interval import (
+    build_capture_interval_block,
+    compute_capture_interval,
+    compute_minimum_plausible_agl,
+)
 from app.models.schemas import Camera, Drone
 from app.modules.planning.elevation import ElevationProvider, create_provider
 from app.schemas.schemas import GridRequest, GridResponse, GSDRequest, GSDResponse, WaypointSchema
@@ -322,14 +326,16 @@ def _terrain_waypoints_from_segments(
     elevation_threshold: float = 5,
     min_spacing_m: float = 0,
     ref_ground: Optional[float] = None,
-) -> tuple[list[WaypointSchema], float]:
+) -> tuple[list[WaypointSchema], float, list[float]]:
     """Ground mode: vertex waypoints + additional waypoints at DEM break points.
 
-    Returns (waypoints, ref_ground) where ref_ground is the elevation used
-    as the terrain reference for altitude calculation.
+    Returns (waypoints, ref_ground, ground_elevations) where ref_ground is the
+    elevation used as the terrain reference for altitude calculation and
+    ground_elevations is the raw DEM sample list for the conservative
+    capture-interval footprint.
     """
     if not segments:
-        return [], ref_ground or 0.0
+        return [], ref_ground or 0.0, []
 
     dem_samples: list[tuple[float, float, float]] = []
 
@@ -346,7 +352,7 @@ def _terrain_waypoints_from_segments(
     elevations = elevation_provider.get_elevations(pts) if elevation_provider else [0.0] * len(pts)
 
     if not elevations or max(elevations) <= 0:
-        return _vertex_waypoints_from_segments(segments, altitude), ref_ground or 0.0
+        return _vertex_waypoints_from_segments(segments, altitude), ref_ground or 0.0, elevations
 
     if ref_ground is None:
         ref_ground = elevations[0]
@@ -385,7 +391,7 @@ def _terrain_waypoints_from_segments(
             if j != n - 1:
                 last_break_elev = elev
 
-    return wps, ref_ground
+    return wps, ref_ground, elevations
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +407,8 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     recommended_speed_ms = 10.0
     if req.drone_id:
         drone = db_session.query(Drone).filter(Drone.id == req.drone_id).first()
+
+    warnings: list[str] = []
 
     # Shutter-limited speed
     gsd_m = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um) / 100
@@ -480,19 +488,32 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
             waypoints.extend(waypoints_b)
         photo_count = sum(s["num_photos"] for s in all_segments)
     else:  # "terrain"
-        waypoints, ref_ground = _terrain_waypoints_from_segments(segments_a, angle_a, req.altitude, center_lat, center_lon,
-                                                                   elevation_provider=elevation_provider,
-                                                                   sample_interval_m=dem_sample_interval,
-                                                                   elevation_threshold=dem_elevation_threshold,
-                                                                   min_spacing_m=min_wp_spacing)
+        terrain_elevations: list[float] = []
+        waypoints, ref_ground, elev_a = _terrain_waypoints_from_segments(
+            segments_a, angle_a, req.altitude, center_lat, center_lon,
+            elevation_provider=elevation_provider,
+            sample_interval_m=dem_sample_interval,
+            elevation_threshold=dem_elevation_threshold,
+            min_spacing_m=min_wp_spacing,
+        )
+        terrain_elevations.extend(elev_a)
         if angle_b is not None:
-            waypoints_b, _ = _terrain_waypoints_from_segments(segments_b, angle_b, req.altitude, center_lat, center_lon,
-                                                               elevation_provider=elevation_provider,
-                                                               sample_interval_m=dem_sample_interval,
-                                                               elevation_threshold=dem_elevation_threshold,
-                                                               min_spacing_m=min_wp_spacing,
-                                                               ref_ground=ref_ground)
+            waypoints_b, _, elev_b = _terrain_waypoints_from_segments(
+                segments_b, angle_b, req.altitude, center_lat, center_lon,
+                elevation_provider=elevation_provider,
+                sample_interval_m=dem_sample_interval,
+                elevation_threshold=dem_elevation_threshold,
+                min_spacing_m=min_wp_spacing,
+                ref_ground=ref_ground,
+            )
             waypoints.extend(waypoints_b)
+            terrain_elevations.extend(elev_b)
+        if not any(e > 0 for e in terrain_elevations):
+            warnings.append(
+                "Elevation data unavailable — Ground (AGL) mode used vertex waypoints "
+                "at flight-line corners; the capture interval assumes the requested "
+                "altitude since terrain relief could not be verified."
+            )
         photo_count = sum(s["num_photos"] for s in all_segments)
 
     # Validate
@@ -518,8 +539,20 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
 
     # 6b. Universal capture interval recommendation (front overlap -> photo interval)
+    # Terrain-follow uses a conservative minimum footprint computed from the
+    # lowest plausible AGL, so the requested front overlap is kept even where
+    # the drone gets closer to the ground than the planned altitude.
+    ci_agl = req.altitude
+    if wp_mode == "terrain":
+        ci_agl = compute_minimum_plausible_agl(
+            requested_agl_m=req.altitude,
+            ground_elevations=terrain_elevations if terrain_elevations else [],
+        )
+    gsd_ci = calc_gsd(ci_agl, camera.focal_length_mm, camera.pixel_size_um)
+    _, fh_ci = calc_footprint(gsd_ci, camera.image_width_px, camera.image_height_px)
+
     ci = compute_capture_interval(
-        footprint_length_m=fh,
+        footprint_length_m=fh_ci,
         front_overlap=req.overlap_frontal,
         flight_speed_mps=recommended_speed_ms,
     )
@@ -539,5 +572,6 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
         sweep_deg=round(sweep_deg, 1),
         num_lines=total_lines,
         waypoint_mode=wp_mode,
+        warnings=warnings,
         capture_interval=build_capture_interval_block(ci),
     )

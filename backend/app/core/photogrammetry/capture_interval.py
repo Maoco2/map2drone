@@ -12,7 +12,7 @@ value (no `round()` is applied to it).
 
 import math
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 from app.schemas.schemas import CaptureIntervalBlock
 
@@ -23,6 +23,11 @@ STATUS_ERROR = "ERROR"
 
 DEFAULT_MIN_INTERVAL_S = 1.0
 DEFAULT_MAX_INTERVAL_S = 60.0
+
+# Floor for the minimum plausible AGL in terrain-follow mode. Prevents a
+# degenerate/negative clearance (e.g. from DEM quirks) from producing a
+# zero/negative footprint that would otherwise be reported as ERROR.
+MIN_PLAUSIBLE_AGL_FLOOR_M = 1.0
 
 # Ratio above which the integer floor forces "substantially more photos than
 # mathematically necessary" and the result is flagged as WARNING instead of
@@ -144,6 +149,36 @@ def compute_capture_interval(
         maximum_speed_for_1s=None,
         status=status,
     )
+
+
+def compute_minimum_plausible_agl(
+    requested_agl_m: float,
+    ground_elevations: Sequence[float | None],
+    fallback_agl_m: Optional[float] = None,
+) -> float:
+    """Lowest plausible camera-to-ground distance along a terrain-follow mission.
+
+    Conservative assumption: the drone tracks the reference ground at the
+    requested AGL, and where the terrain rises above the reference the actual
+    clearance shrinks by that relief. The minimum plausible AGL is therefore
+    the requested AGL minus the maximum rise above the reference sample. This
+    yields the *smallest* footprint the payload can see, so the capture
+    interval derived from it always honours the requested front overlap even
+    where the drone gets closer to the ground than planned.
+
+    When no usable ground elevations are available (`ground_elevations` empty
+    or all non-positive), the minimum plausible AGL is `fallback_agl_m` if
+    provided, else `requested_agl_m`. The result is floored at
+    `MIN_PLAUSIBLE_AGL_FLOOR_M` so it can never go degenerate.
+    """
+    valid = [e for e in ground_elevations if e is not None and e > 0]
+    if not valid:
+        value = fallback_agl_m if fallback_agl_m is not None else requested_agl_m
+    else:
+        ref_ground = valid[0]
+        max_rise = max(0.0, max(valid) - ref_ground)
+        value = requested_agl_m - max_rise
+    return max(value, MIN_PLAUSIBLE_AGL_FLOOR_M)
 
 
 def build_capture_interval_block(ci: CaptureIntervalResult) -> CaptureIntervalBlock:

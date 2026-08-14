@@ -18,7 +18,11 @@ from typing import Optional
 from pyproj import CRS, Transformer
 from shapely.geometry import GeometryCollection, LineString, MultiLineString, Point, Polygon
 
-from app.core.photogrammetry.capture_interval import build_capture_interval_block, compute_capture_interval
+from app.core.photogrammetry.capture_interval import (
+    build_capture_interval_block,
+    compute_capture_interval,
+    compute_minimum_plausible_agl,
+)
 from app.models.schemas import Camera, Drone
 from app.modules.planning.elevation import ElevationProvider, create_provider
 from app.modules.planning.engine import calc_footprint, calc_gsd
@@ -213,10 +217,15 @@ def _terrain_waypoints(
     sample_interval_m: float,
     elevation_threshold: float,
     warnings: Optional[list[str]] = None,
-) -> tuple[list[WaypointSchema], float]:
-    """Ground mode: vertex waypoints at DEM break points + flight-line vertices."""
+) -> tuple[list[WaypointSchema], float, list[float]]:
+    """Ground mode: vertex waypoints at DEM break points + flight-line vertices.
+
+    Returns (waypoints, ref_ground, ground_elevations) where ref_ground is the
+    terrain reference elevation and ground_elevations is the raw DEM sample
+    list used for the conservative capture-interval footprint.
+    """
     if not segments:
-        return [], 0.0
+        return [], 0.0, []
 
     samples: list[tuple[float, float, float, bool]] = []  # (lat, lng, heading, forced)
     sample_pts: list[tuple[float, float]] = []
@@ -253,9 +262,11 @@ def _terrain_waypoints(
         if warnings is not None:
             warnings.append(
                 "Elevation data unavailable — Ground (AGL) mode used vertex waypoints "
-                "at flight-line corners instead of terrain-adjusted samples."
+                "at flight-line corners instead of terrain-adjusted samples; the capture "
+                "interval assumes the requested altitude since terrain relief could not "
+                "be verified."
             )
-        return _vertex_waypoints(segments, altitude, inverse), 0.0
+        return _vertex_waypoints(segments, altitude, inverse), 0.0, elevations
 
     ref_ground = elevations[0]
     wps: list[WaypointSchema] = []
@@ -280,7 +291,7 @@ def _terrain_waypoints(
             if k != count - 1:
                 last_break_elev = elev
 
-    return wps, ref_ground
+    return wps, ref_ground, elevations
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +389,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     elevation_provider: Optional[ElevationProvider] = None
     dem_sample_interval = 10.0
     dem_elevation_threshold = 5.0
+    terrain_elevations: list[float] = []
     if wp_mode == "terrain":
         elevation_provider = create_provider()
         res = req.dem_resolution_m or 30.0
@@ -390,7 +402,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         waypoints = _vertex_waypoints(segments, req.altitude, inverse)
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
     else:  # terrain
-        waypoints, _ = _terrain_waypoints(
+        waypoints, _, terrain_elevations = _terrain_waypoints(
             segments, req.altitude, inverse, elevation_provider,
             dem_sample_interval, dem_elevation_threshold, warnings,
         )
@@ -419,8 +431,20 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
 
     # Universal capture interval recommendation (front overlap -> photo interval)
+    # Terrain-follow uses a conservative minimum footprint computed from the
+    # lowest plausible AGL, so the requested front overlap is kept even where
+    # the drone gets closer to the ground than the planned altitude.
+    ci_agl = req.altitude
+    if wp_mode == "terrain":
+        ci_agl = compute_minimum_plausible_agl(
+            requested_agl_m=req.altitude,
+            ground_elevations=terrain_elevations if terrain_elevations else [],
+        )
+    gsd_ci = calc_gsd(ci_agl, camera.focal_length_mm, camera.pixel_size_um)
+    _, fh_ci = calc_footprint(gsd_ci, camera.image_width_px, camera.image_height_px)
+
     ci = compute_capture_interval(
-        footprint_length_m=fh,
+        footprint_length_m=fh_ci,
         front_overlap=req.overlap_frontal,
         flight_speed_mps=recommended_speed_ms,
     )

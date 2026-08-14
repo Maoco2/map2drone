@@ -1,16 +1,19 @@
 """Tests for the Capture Interval Engine (app.core.photogrammetry.capture_interval)."""
 
-import pytest
+from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, engine
 from app.core.photogrammetry.capture_interval import (
+    MIN_PLAUSIBLE_AGL_FLOOR_M,
     STATUS_ERROR,
     STATUS_INCOMPATIBLE,
     STATUS_VALID,
     STATUS_WARNING,
     compute_capture_interval,
+    compute_minimum_plausible_agl,
 )
 from app.main import app
 
@@ -124,10 +127,86 @@ def test_error_invalid_inputs():
     assert compute_capture_interval(20, 75, -1).status == STATUS_ERROR
 
 
+# --- Terrain-follow: conservative minimum footprint ------------------------
+
+
+def test_min_agl_constant_terrain_uses_nominal():
+    assert compute_minimum_plausible_agl(100.0, [600.0, 600.0, 600.0]) == pytest.approx(100.0)
+
+
+def test_min_agl_rising_terrain_reduces_agl():
+    # terrain rising 40 m above the reference -> minimum AGL drops by 40 m
+    assert compute_minimum_plausible_agl(100.0, [600.0, 620.0, 640.0]) == pytest.approx(60.0)
+
+
+def test_min_agl_falling_terrain_keeps_nominal():
+    # terrain only falls below the reference -> minimum clearance stays nominal
+    assert compute_minimum_plausible_agl(100.0, [640.0, 620.0, 600.0]) == pytest.approx(100.0)
+
+
+def test_min_agl_empty_elevations_falls_back():
+    assert compute_minimum_plausible_agl(100.0, []) == pytest.approx(100.0)
+    assert compute_minimum_plausible_agl(100.0, [], fallback_agl_m=80.0) == pytest.approx(80.0)
+
+
+def test_min_agl_all_zero_elevations_falls_back():
+    # DEM unavailable (all zeros) -> safest available estimate is the nominal AGL
+    assert compute_minimum_plausible_agl(100.0, [0.0, 0.0, 0.0]) == pytest.approx(100.0)
+
+
+def test_min_agl_never_below_floor():
+    assert compute_minimum_plausible_agl(50.0, [600.0, 900.0]) == pytest.approx(MIN_PLAUSIBLE_AGL_FLOOR_M)
+
+
+def _cam_footprint_length(agl_m: float) -> float:
+    """Along-track footprint (m) for cam-1-20mp at the given AGL."""
+    from app.modules.planning.engine import calc_footprint, calc_gsd
+
+    gsd = calc_gsd(agl_m, 8.8, 2.41)  # focal 8.8mm, pixel 2.41um
+    _, length = calc_footprint(gsd, 5472, 3648)
+    return length
+
+
+def test_min_footprint_is_smaller_than_nominal():
+    nominal = _cam_footprint_length(100.0)
+    min_agl = compute_minimum_plausible_agl(100.0, [600.0, 620.0, 640.0])
+    conservative = _cam_footprint_length(min_agl)
+    assert min_agl < 100.0
+    assert conservative < nominal
+
+
+def test_terrain_interval_uses_conservative_footprint_integer_and_overlap():
+    nominal_fh = _cam_footprint_length(100.0)
+    min_agl = compute_minimum_plausible_agl(100.0, [600.0, 620.0, 640.0])
+    conservative_fh = _cam_footprint_length(min_agl)
+    speed = 5.0
+
+    nom = compute_capture_interval(nominal_fh, 75.0, speed)
+    cons = compute_capture_interval(conservative_fh, 75.0, speed)
+
+    assert cons.recommended_interval_s is not None
+    assert float(cons.recommended_interval_s).is_integer()
+    if nom.recommended_interval_s is not None:
+        # a smaller footprint can only shrink the interval, never grow it
+        assert cons.recommended_interval_s <= nom.recommended_interval_s
+    if cons.status in (STATUS_VALID, STATUS_WARNING):
+        assert cons.effective_front_overlap >= cons.required_front_overlap / 100.0 - 1e-9
+
+
+def test_terrain_incompatible_when_1s_insufficient():
+    # relief >= altitude -> minimum AGL clamps at the floor -> tiny footprint
+    min_agl = compute_minimum_plausible_agl(100.0, [600.0, 800.0])
+    fh = _cam_footprint_length(min_agl)
+    res = compute_capture_interval(fh, 85.0, 12.0)
+    assert res.status == STATUS_INCOMPATIBLE
+    assert res.recommended_interval_s is None
+    assert res.maximum_speed_for_1s == pytest.approx(res.required_photo_spacing_m / 1.0)
+
+
 # --- Endpoint integration ------------------------------------------------
 
 
-def _api_grid():
+def _api_grid(altitude_mode: str = "takeoff"):
     return client.post("/api/v1/planning/grid", json={
         "polygon": {
             "type": "Polygon",
@@ -138,10 +217,11 @@ def _api_grid():
         "overlap_lateral": 65,
         "camera_id": "cam-43-20mp",
         "drone_id": "dji-m3e",
+        "altitude_mode": altitude_mode,
     })
 
 
-def _api_corridor():
+def _api_corridor(altitude_mode: str = "takeoff"):
     return client.post("/api/v1/planning/corridor", json={
         "centerline": {
             "type": "LineString",
@@ -153,7 +233,7 @@ def _api_corridor():
         "overlap_frontal": 75,
         "overlap_lateral": 65,
         "camera_id": "cam-1-20mp",
-        "altitude_mode": "takeoff",
+        "altitude_mode": altitude_mode,
     })
 
 
@@ -184,3 +264,82 @@ def test_api_corridor_returns_capture_interval():
     assert ci["recommended_interval_s"] is None or ci["recommended_interval_s"] >= 1
     if ci["status"] in (STATUS_VALID, STATUS_WARNING):
         assert ci["recommended_interval_s"] is not None
+
+
+class FakeProvider:
+    """DEM provider whose terrain rises above the first sample (max 118 m)."""
+
+    def get_elevations(self, points):
+        return [100.0 + (i % 7) * 3.0 for i in range(len(points))]
+
+
+def test_api_grid_terrain_capture_interval_is_conservative():
+    Base.metadata.create_all(bind=engine)
+    with patch("app.modules.planning.engine.create_provider", return_value=FakeProvider()):
+        resp = _api_grid(altitude_mode="ground")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["waypoint_mode"] == "terrain"
+    ci = data["capture_interval"]
+    assert ci is not None
+
+    resp_nom = _api_grid(altitude_mode="takeoff")
+    assert resp_nom.status_code == 200
+    ci_nom = resp_nom.json()["capture_interval"]
+    assert ci_nom is not None
+
+    # terrain relief above the reference shrinks the minimum footprint, so the
+    # required photo spacing must be strictly smaller than the nominal-altitude one
+    assert ci["required_photo_spacing_m"] is not None
+    assert ci_nom["required_photo_spacing_m"] is not None
+    assert ci["required_photo_spacing_m"] < ci_nom["required_photo_spacing_m"]
+    if ci["recommended_interval_s"] is not None and ci_nom["recommended_interval_s"] is not None:
+        assert ci["recommended_interval_s"] <= ci_nom["recommended_interval_s"]
+
+
+def test_api_corridor_terrain_capture_interval_is_conservative():
+    Base.metadata.create_all(bind=engine)
+    with patch("app.modules.corridor.engine.create_provider", return_value=FakeProvider()):
+        resp = _api_corridor(altitude_mode="ground")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["waypoint_mode"] == "terrain"
+    ci = data["capture_interval"]
+    assert ci is not None
+
+    resp_nom = _api_corridor(altitude_mode="takeoff")
+    assert resp_nom.status_code == 200
+    ci_nom = resp_nom.json()["capture_interval"]
+    assert ci_nom is not None
+
+    assert ci["required_photo_spacing_m"] is not None
+    assert ci_nom["required_photo_spacing_m"] is not None
+    assert ci["required_photo_spacing_m"] < ci_nom["required_photo_spacing_m"]
+    if ci["recommended_interval_s"] is not None and ci_nom["recommended_interval_s"] is not None:
+        assert ci["recommended_interval_s"] <= ci_nom["recommended_interval_s"]
+
+
+def test_api_grid_terrain_dem_unavailable_warns_and_keeps_nominal_interval():
+    Base.metadata.create_all(bind=engine)
+    with patch("app.modules.planning.engine.create_provider", return_value=FakeProvider()):
+        resp = _api_grid(altitude_mode="ground")
+    assert resp.status_code == 200
+    # with usable DEM the capture-interval footprint is conservative (smaller)
+    ci_ok = resp.json()["capture_interval"]
+
+    class ZeroProvider:
+        def get_elevations(self, points):
+            return [0.0] * len(points)
+
+    with patch("app.modules.planning.engine.create_provider", return_value=ZeroProvider()):
+        resp = _api_grid(altitude_mode="ground")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["waypoint_mode"] == "terrain"
+    assert any("Elevation data unavailable" in w for w in data["warnings"])
+    ci = data["capture_interval"]
+    assert ci is not None
+    # DEM unavailable -> interval uses the nominal altitude, which is >= conservative
+    assert ci["required_photo_spacing_m"] is not None
+    assert ci_ok["required_photo_spacing_m"] is not None
+    assert ci["required_photo_spacing_m"] >= ci_ok["required_photo_spacing_m"]

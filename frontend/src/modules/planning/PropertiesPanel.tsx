@@ -84,6 +84,14 @@ export default function PropertiesPanel() {
   const [gridType, setGridType] = useState<'simple' | 'cross'>('simple');
   const [importingFile, setImportingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [captureSnapshot, setCaptureSnapshot] = useState<{
+    altitude: number;
+    overlapFrontal: number;
+    overlapLateral: number;
+    droneId: string;
+    altitudeMode: string;
+    missionVariant: string;
+  } | null>(null);
   const manufacturers = useMemo(() => {
     if (!drones) return [];
     return [...new Set(drones.map((d: Drone) => d.manufacturer))].sort();
@@ -114,6 +122,21 @@ export default function PropertiesPanel() {
       frontOverlap: Number(overlapFrontal),
     });
   }, [camera, drone, altitude, overlapFrontal]);
+
+  // Right after Generate the backend block is authoritative (it applies the
+  // terrain-follow conservative minimum footprint). Once any input that feeds
+  // the capture interval changes, the backend block is stale -> live mirror.
+  const backendCapture = useMemo(() => {
+    if (!gridResult?.capture_interval || !captureSnapshot) return null;
+    const same =
+      Number(altitude) === captureSnapshot.altitude &&
+      Number(overlapFrontal) === captureSnapshot.overlapFrontal &&
+      Number(overlapLateral) === captureSnapshot.overlapLateral &&
+      (droneId ?? '') === captureSnapshot.droneId &&
+      altitudeMode === captureSnapshot.altitudeMode &&
+      missionVariant === captureSnapshot.missionVariant;
+    return same ? gridResult.capture_interval : null;
+  }, [gridResult, captureSnapshot, altitude, overlapFrontal, overlapLateral, droneId, altitudeMode, missionVariant]);
 
   const polygonPoints = useMemo(() => {
     if (!lastFeature) return null;
@@ -170,6 +193,14 @@ export default function PropertiesPanel() {
           altitude_mode: altitudeMode,
         });
         setGridResult(result);
+        setCaptureSnapshot({
+          altitude: Number(altitude),
+          overlapFrontal: Number(overlapFrontal),
+          overlapLateral: Number(overlapLateral),
+          droneId: droneId ?? '',
+          altitudeMode,
+          missionVariant,
+        });
         fetchMissions();
         return;
       }
@@ -193,6 +224,14 @@ export default function PropertiesPanel() {
       };
       const result = await api.planning.grid(baseReq);
       setGridResult(result);
+      setCaptureSnapshot({
+        altitude: Number(altitude),
+        overlapFrontal: Number(overlapFrontal),
+        overlapLateral: Number(overlapLateral),
+        droneId: droneId ?? '',
+        altitudeMode,
+        missionVariant,
+      });
       fetchMissions();
     } catch (err: any) {
       setError(err.message || 'Mission generation failed');
@@ -545,12 +584,12 @@ export default function PropertiesPanel() {
               </div>
             )}
 
-            {liveCapture && (
+            {(backendCapture || liveCapture) && (
               <CaptureIntervalCard
-                result={liveCapture.result}
-                gsd={liveCapture.gsd}
-                footprintLengthM={liveCapture.footprintLength}
-                frontOverlap={Number(overlapFrontal)}
+                result={backendCapture ?? liveCapture!.result}
+                gsd={backendCapture ? gridResult.gsd : liveCapture!.gsd}
+                footprintLengthM={backendCapture ? gridResult.footprint_height : liveCapture!.footprintLength}
+                frontOverlap={backendCapture ? (backendCapture.required_front_overlap ?? Number(overlapFrontal)) : Number(overlapFrontal)}
                 lateralOverlap={Number(overlapLateral)}
               />
             )}

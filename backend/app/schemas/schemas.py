@@ -155,6 +155,7 @@ class GridResponse(BaseModel):
     sweep_deg: float = 0
     num_lines: int = 0
     waypoint_mode: str = "photo"
+    warnings: list[str] = []
     capture_interval: Optional[CaptureIntervalBlock] = None
 
 
