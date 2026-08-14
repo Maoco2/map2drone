@@ -120,8 +120,9 @@ export default function PropertiesPanel() {
       camera,
       drone,
       frontOverlap: Number(overlapFrontal),
+      terrainFollow: altitudeMode === 'ground',
     });
-  }, [camera, drone, altitude, overlapFrontal]);
+  }, [camera, drone, altitude, overlapFrontal, altitudeMode]);
 
   // Right after Generate the backend block is authoritative (it applies the
   // terrain-follow conservative minimum footprint). Once any input that feeds

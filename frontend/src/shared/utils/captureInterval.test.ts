@@ -10,7 +10,7 @@ import {
   computeLiveCapture,
   computeMinimumPlausibleAgl,
 } from './captureInterval';
-import type { Camera, Drone } from '@/shared/types/project';
+import type { Camera, Drone, CaptureIntervalResult } from '@/shared/types/project';
 
 function forIdealInterval(idealS: number) {
   const speed = 1.0;
@@ -187,12 +187,68 @@ describe('computeMinimumPlausibleAgl (terrain-follow conservative rule)', () => 
       camera,
       drone,
       frontOverlap: 75,
+      terrainFollow: true,
       groundElevations: [600, 620, 640],
     });
     expect(conservative.footprintLength).toBeLessThan(nominal.footprintLength);
     expect((conservative.result.recommended_interval_s ?? Infinity)).toBeLessThanOrEqual(
       nominal.result.recommended_interval_s ?? Infinity,
     );
+  });
+
+  it('exposes the assumed conservative AGL on the result when terrain-follow is on', () => {
+    const camera: Camera = {
+      id: 'c1',
+      name: 'Test',
+      sensor_width_mm: 13.2,
+      sensor_height_mm: 8.8,
+      image_width_px: 5472,
+      image_height_px: 3648,
+      focal_length_mm: 8.8,
+      pixel_size_um: 2.41,
+      shutter_speed_s: 0.001,
+      shutter_type: 'electronic',
+    };
+    const drone: Drone = {
+      id: 'd1',
+      name: 'Test',
+      manufacturer: 'T',
+      weight_kg: 1,
+      max_speed_ms: 21,
+      flight_time_min: 45,
+      max_altitude_m: 5000,
+      camera_id: 'c1',
+    };
+    const terrain = computeLiveCapture({
+      altitude: 100,
+      camera,
+      drone,
+      frontOverlap: 75,
+      terrainFollow: true,
+      groundElevations: [600, 620, 640],
+    });
+    expect(terrain.result.terrain_follow).toBe(true);
+    expect(terrain.result.planned_agl_m).toBe(100);
+    expect(terrain.result.assumed_agl_m).toBeCloseTo(60);
+    expect(terrain.assumedAglM).toBeCloseTo(60);
+    expect(terrain.terrainFollow).toBe(true);
+    expect(terrain.result.assumed_footprint_length_m).toBeCloseTo(terrain.footprintLength);
+
+    // without elevation data (live mirror) it falls back to the requested AGL
+    const fallback = computeLiveCapture({
+      altitude: 100,
+      camera,
+      drone,
+      frontOverlap: 75,
+      terrainFollow: true,
+    });
+    expect(fallback.result.terrain_follow).toBe(true);
+    expect(fallback.result.assumed_agl_m).toBeCloseTo(100);
+
+    // non-terrain leaves the assumption off
+    const plain = computeLiveCapture({ altitude: 100, camera, drone, frontOverlap: 75 });
+    expect(plain.result.terrain_follow).toBe(false);
+    expect(plain.result.assumed_agl_m).toBeCloseTo(100);
   });
 });
 
@@ -204,5 +260,27 @@ describe('buildCopyConfigText', () => {
     expect(text).toContain('Intervalo: 2 segundos');
     expect(text).not.toContain('Intervalo: 2.5');
     expect(text).toContain('Velocidad: 2.0 m/s');
+  });
+
+  it('exposes the conservative assumed AGL when terrain-follow is active', () => {
+    const res: CaptureIntervalResult = {
+      status: STATUS_VALID,
+      required_photo_spacing_m: 15.0,
+      ideal_interval_s: 3.0,
+      recommended_interval_s: 3,
+      actual_photo_spacing_m: 15.0,
+      effective_front_overlap: 80,
+      required_front_overlap: 75,
+      speed_mps: 5.0,
+      planned_agl_m: 100,
+      terrain_follow: true,
+      assumed_agl_m: 60,
+      assumed_footprint_length_m: 59.9,
+    };
+    const text = buildCopyConfigText({ result: res, frontOverlap: 75, lateralOverlap: 65 });
+    expect(text).toContain('Altitud planificada: 100 m');
+    expect(text).toContain('Seguimiento de terreno: activado');
+    expect(text).toContain('AGL conservador asumido: 60.0 m');
+    expect(text).toContain('Huella fotográfica: 59.9 m');
   });
 });

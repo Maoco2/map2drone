@@ -181,8 +181,20 @@ def compute_minimum_plausible_agl(
     return max(value, MIN_PLAUSIBLE_AGL_FLOOR_M)
 
 
-def build_capture_interval_block(ci: CaptureIntervalResult) -> CaptureIntervalBlock:
-    """Map an engine result onto the API schema block (single source of truth)."""
+def build_capture_interval_block(
+    ci: CaptureIntervalResult,
+    *,
+    planned_agl_m: Optional[float] = None,
+    terrain_follow: bool = False,
+    assumed_agl_m: Optional[float] = None,
+    assumed_footprint_length_m: Optional[float] = None,
+) -> CaptureIntervalBlock:
+    """Map an engine result onto the API schema block (single source of truth).
+
+    Terrain context is passed by the planning engines so the block exposes the
+    AGL that was actually used for the (conservative) footprint, making the
+    assumption transparent to the user.
+    """
     return CaptureIntervalBlock(
         status=ci.status,
         required_photo_spacing_m=(
@@ -201,5 +213,12 @@ def build_capture_interval_block(ci: CaptureIntervalResult) -> CaptureIntervalBl
         speed_mps=round(ci.speed_mps, 2),
         maximum_speed_for_1s=(
             round(ci.maximum_speed_for_1s, 2) if ci.maximum_speed_for_1s is not None else None
+        ),
+        planned_agl_m=planned_agl_m,
+        terrain_follow=terrain_follow,
+        assumed_agl_m=assumed_agl_m,
+        assumed_footprint_length_m=(
+            round(assumed_footprint_length_m, 3)
+            if assumed_footprint_length_m is not None else None
         ),
     )

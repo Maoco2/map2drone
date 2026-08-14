@@ -81,6 +81,9 @@ export default function CaptureIntervalCard({
             </div>
           </div>
           {row('Velocidad', `${speed.toFixed(1)} m/s`)}
+          {result.assumed_footprint_length_m != null && (
+            row('Huella fotográfica', `${result.assumed_footprint_length_m.toFixed(1)} m`)
+          )}
           {result.required_photo_spacing_m != null && (
             row('Espaciado requerido', `${result.required_photo_spacing_m.toFixed(1)} m`)
           )}
@@ -117,6 +120,25 @@ export default function CaptureIntervalCard({
       ) : (
         <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
           Parámetros de captura no válidos.
+        </div>
+      )}
+
+      {result.terrain_follow && (
+        <div
+          className="pt-1.5 space-y-1 border-t"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <div className="text-[9px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            CÁLCULO CONSERVADOR · TERRENO
+          </div>
+          {result.planned_agl_m != null && row('Altitud planificada', `${result.planned_agl_m.toFixed(0)} m`)}
+          {result.assumed_agl_m != null && (
+            row('AGL conservador asumido', `${result.assumed_agl_m.toFixed(1)} m`)
+          )}
+          <div className="text-[9px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            AGL usado para el cálculo fotogramétrico conservador — puede ser menor
+            que la altitud nominal de vuelo para garantizar el overlap frontal sobre el relieve.
+          </div>
         </div>
       )}
 

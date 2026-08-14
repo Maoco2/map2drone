@@ -282,17 +282,27 @@ def test_api_grid_terrain_capture_interval_is_conservative():
     assert data["waypoint_mode"] == "terrain"
     ci = data["capture_interval"]
     assert ci is not None
+    # the assumed conservative AGL is exposed (transparent estimate)
+    assert ci["terrain_follow"] is True
+    assert ci["planned_agl_m"] == 100
+    assert ci["assumed_agl_m"] is not None
+    assert ci["assumed_agl_m"] < ci["planned_agl_m"]
+    assert ci["assumed_footprint_length_m"] is not None
 
     resp_nom = _api_grid(altitude_mode="takeoff")
     assert resp_nom.status_code == 200
     ci_nom = resp_nom.json()["capture_interval"]
     assert ci_nom is not None
+    assert ci_nom["terrain_follow"] is False
+    assert ci_nom["assumed_agl_m"] == 100
+    assert ci_nom["assumed_footprint_length_m"] == pytest.approx(ci_nom["assumed_footprint_length_m"])
 
     # terrain relief above the reference shrinks the minimum footprint, so the
     # required photo spacing must be strictly smaller than the nominal-altitude one
     assert ci["required_photo_spacing_m"] is not None
     assert ci_nom["required_photo_spacing_m"] is not None
     assert ci["required_photo_spacing_m"] < ci_nom["required_photo_spacing_m"]
+    assert ci["assumed_footprint_length_m"] < ci_nom["assumed_footprint_length_m"]
     if ci["recommended_interval_s"] is not None and ci_nom["recommended_interval_s"] is not None:
         assert ci["recommended_interval_s"] <= ci_nom["recommended_interval_s"]
 
@@ -306,15 +316,23 @@ def test_api_corridor_terrain_capture_interval_is_conservative():
     assert data["waypoint_mode"] == "terrain"
     ci = data["capture_interval"]
     assert ci is not None
+    assert ci["terrain_follow"] is True
+    assert ci["planned_agl_m"] == 100
+    assert ci["assumed_agl_m"] is not None
+    assert ci["assumed_agl_m"] < ci["planned_agl_m"]
+    assert ci["assumed_footprint_length_m"] is not None
 
     resp_nom = _api_corridor(altitude_mode="takeoff")
     assert resp_nom.status_code == 200
     ci_nom = resp_nom.json()["capture_interval"]
     assert ci_nom is not None
+    assert ci_nom["terrain_follow"] is False
+    assert ci_nom["assumed_agl_m"] == 100
 
     assert ci["required_photo_spacing_m"] is not None
     assert ci_nom["required_photo_spacing_m"] is not None
     assert ci["required_photo_spacing_m"] < ci_nom["required_photo_spacing_m"]
+    assert ci["assumed_footprint_length_m"] < ci_nom["assumed_footprint_length_m"]
     if ci["recommended_interval_s"] is not None and ci_nom["recommended_interval_s"] is not None:
         assert ci["recommended_interval_s"] <= ci_nom["recommended_interval_s"]
 

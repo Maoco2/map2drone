@@ -474,5 +474,11 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
             transformation=f"EPSG:4326 -> EPSG:{epsg} (pyproj/shapely projected geometry)",
         ),
         warnings=warnings,
-        capture_interval=build_capture_interval_block(ci),
+        capture_interval=build_capture_interval_block(
+            ci,
+            planned_agl_m=req.altitude,
+            terrain_follow=(wp_mode == "terrain"),
+            assumed_agl_m=ci_agl,
+            assumed_footprint_length_m=fh_ci,
+        ),
     )

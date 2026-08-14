@@ -111,6 +111,12 @@ class CaptureIntervalBlock(BaseModel):
     `recommended_interval_s` is the operational value and is ALWAYS an integer
     number of seconds. `ideal_interval_s` is informational only. Overlap values
     are expressed in percent (0-100).
+
+    Terrain-follow fields (`terrain_follow`, `planned_agl_m`, `assumed_agl_m`,
+    `assumed_footprint_length_m`) expose the AGL that was actually used for the
+    conservative photogrammetric footprint. `assumed_agl_m` is the minimum
+    plausible AGL and is an ESTIMATE (it can be below the planned altitude);
+    it is never the nominal flight altitude by itself.
     """
     status: str = "ERROR"
     required_photo_spacing_m: Optional[float] = None
@@ -121,6 +127,10 @@ class CaptureIntervalBlock(BaseModel):
     required_front_overlap: Optional[float] = None
     speed_mps: Optional[float] = None
     maximum_speed_for_1s: Optional[float] = None
+    planned_agl_m: Optional[float] = None
+    terrain_follow: bool = False
+    assumed_agl_m: Optional[float] = None
+    assumed_footprint_length_m: Optional[float] = None
 
 
 class GridRequest(BaseModel):

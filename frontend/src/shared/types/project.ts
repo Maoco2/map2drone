@@ -96,6 +96,10 @@ export interface CaptureIntervalResult {
   required_front_overlap?: number;
   speed_mps?: number;
   maximum_speed_for_1s?: number;
+  planned_agl_m?: number;
+  terrain_follow?: boolean;
+  assumed_agl_m?: number;
+  assumed_footprint_length_m?: number;
 }
 
 export interface GridResult {

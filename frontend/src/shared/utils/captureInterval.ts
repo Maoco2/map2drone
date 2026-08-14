@@ -139,6 +139,9 @@ export interface LiveCapture {
   footprintWidth: number;
   footprintLength: number;
   speedMps: number;
+  plannedAglM: number;
+  assumedAglM: number;
+  terrainFollow: boolean;
 }
 
 /**
@@ -146,23 +149,34 @@ export interface LiveCapture {
  * backend planning engine. Single shared helper for Area Grid, Linear Corridor
  * and the capture card (no per-variant duplication).
  *
- * When Terrain Following is enabled `groundElevations` lets the helper apply
- * the same conservative minimum-footprint rule as the backend; without elevation
- * data it falls back to the requested altitude (the safest available estimate).
+ * When Terrain Following is enabled (`terrainFollow: true`) the same
+ * conservative minimum-footprint rule as the backend is applied: `groundElevations`
+ * narrow it to the lowest plausible AGL, otherwise it falls back to the requested
+ * altitude (the safest available estimate). The assumed AGL is exposed on the
+ * result so the card can label it transparently.
  */
 export function computeLiveCapture(opts: {
   altitude: number;
   camera: Camera;
   drone?: Drone;
   frontOverlap: number;
+  terrainFollow?: boolean;
   groundElevations?: (number | null | undefined)[];
 }): LiveCapture {
-  const minAgl = computeMinimumPlausibleAgl(opts.altitude, opts.groundElevations);
-  const gsd = calcGsd(minAgl, opts.camera.focal_length_mm, opts.camera.pixel_size_um);
+  const plannedAglM = opts.altitude;
+  const terrainFollow = opts.terrainFollow === true;
+  const assumedAglM = terrainFollow ? computeMinimumPlausibleAgl(opts.altitude, opts.groundElevations) : opts.altitude;
+  const gsd = calcGsd(assumedAglM, opts.camera.focal_length_mm, opts.camera.pixel_size_um);
   const [footprintWidth, footprintLength] = calcFootprint(gsd, opts.camera.image_width_px, opts.camera.image_height_px);
   const speedMps = calcRecommendedSpeedMps(gsd, opts.camera, opts.drone?.max_speed_ms);
-  const result = computeCaptureInterval(footprintLength, opts.frontOverlap, speedMps);
-  return { result, gsd, footprintWidth, footprintLength, speedMps };
+  const result: CaptureIntervalResult = {
+    ...computeCaptureInterval(footprintLength, opts.frontOverlap, speedMps),
+    planned_agl_m: plannedAglM,
+    terrain_follow: terrainFollow,
+    assumed_agl_m: assumedAglM,
+    assumed_footprint_length_m: footprintLength,
+  };
+  return { result, gsd, footprintWidth, footprintLength, speedMps, plannedAglM, assumedAglM, terrainFollow };
 }
 
 /** Clipboard text for the "COPIAR CONFIGURACIÓN" button (operational values only). */
@@ -195,10 +209,26 @@ export function buildCopyConfigText(opts: {
     }
   }
 
+  if (result.planned_agl_m != null) {
+    lines.push(`Altitud planificada: ${result.planned_agl_m.toFixed(0)} m`);
+  }
+  if (result.terrain_follow) {
+    lines.push('Seguimiento de terreno: activado');
+    if (result.assumed_agl_m != null) {
+      lines.push(`AGL conservador asumido: ${result.assumed_agl_m.toFixed(1)} m`);
+    }
+  }
+  // The footprint shown when terrain-follow is active is the conservative one
+  // (computed from the assumed AGL).
+  if (result.assumed_footprint_length_m != null) {
+    lines.push(`Huella fotográfica: ${result.assumed_footprint_length_m.toFixed(1)} m`);
+  } else if (opts.footprintLengthM != null) {
+    lines.push(`Huella fotográfica: ${opts.footprintLengthM.toFixed(1)} m`);
+  }
+
   if (opts.frontOverlap != null) lines.push(`Overlap frontal: ${opts.frontOverlap.toFixed(0)} %`);
   if (opts.lateralOverlap != null) lines.push(`Overlap lateral: ${opts.lateralOverlap.toFixed(0)} %`);
   if (opts.gsd != null) lines.push(`GSD: ${opts.gsd.toFixed(2)} cm/px`);
-  if (opts.footprintLengthM != null) lines.push(`Huella fotográfica: ${opts.footprintLengthM.toFixed(1)} m`);
 
   lines.push(`Estado: ${result.status}`);
   return lines.join('\n');
