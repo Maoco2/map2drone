@@ -75,6 +75,35 @@ def _polyline_local_heading(p1: tuple[float, float], p2: tuple[float, float]) ->
     return (math.degrees(math.atan2(dx, dy)) + 360.0) % 360.0
 
 
+def _path_vertices(line: LineString) -> list[tuple[float, float]]:
+    """Return the vertices that represent a real direction change.
+
+    Only consecutive duplicates and points exactly collinear with their
+    neighbours are dropped; every other vertex — no matter how small the
+    direction change — is kept, so flight-line corners always get a waypoint.
+    """
+    coords = list(line.coords)
+    if len(coords) < 2:
+        return coords
+    cleaned: list[tuple[float, float]] = [coords[0]]
+    for p in coords[1:]:
+        if p != cleaned[-1]:
+            cleaned.append(p)
+    if len(cleaned) < 3:
+        return cleaned
+    out: list[tuple[float, float]] = [cleaned[0]]
+    for i in range(1, len(cleaned) - 1):
+        a, b, c = cleaned[i - 1], cleaned[i], cleaned[i + 1]
+        h1 = _polyline_local_heading(a, b)
+        h2 = _polyline_local_heading(b, c)
+        delta = abs((h2 - h1 + 540.0) % 360.0 - 180.0)
+        if delta <= 1e-6:
+            continue
+        out.append(cleaned[i])
+    out.append(cleaned[-1])
+    return out
+
+
 def _build_corridor_polygon(left: LineString, right: LineString) -> Polygon:
     ring = list(left.coords) + list(right.coords)[::-1]
     poly = Polygon(ring)
@@ -122,7 +151,6 @@ def _photo_waypoints(
     altitude: float,
     inverse: Transformer,
     photo_spacing_m: float,
-    vertex_tolerance_m: float,
 ) -> tuple[list[WaypointSchema], int]:
     """Photo waypoints plus one waypoint at every flight-line vertex.
 
@@ -138,7 +166,7 @@ def _photo_waypoints(
         for j in range(n):
             d = (j + 0.5) * seg.length / n
             positions[round(d, 3)] = 1
-        for pt in seg.simplify(vertex_tolerance_m, preserve_topology=False).coords:
+        for pt in _path_vertices(seg):
             key = round(seg.project(Point(pt)), 3)
             positions.setdefault(key, -1)
         for d in sorted(positions):
@@ -160,13 +188,11 @@ def _vertex_waypoints(
     segments: list[LineString],
     altitude: float,
     inverse: Transformer,
-    tolerance_m: float,
 ) -> list[WaypointSchema]:
-    """Takeoff mode: simplified path vertices (entry/exit + curve points)."""
+    """Takeoff mode: a waypoint at every flight-line vertex (any direction change)."""
     wps: list[WaypointSchema] = []
     for idx, seg in enumerate(segments):
-        line = seg.simplify(tolerance_m, preserve_topology=False)
-        coords = list(line.coords)
+        coords = _path_vertices(seg)
         if idx % 2 == 1:
             coords = coords[::-1]
         n = len(coords)
@@ -184,7 +210,6 @@ def _terrain_waypoints(
     elevation_provider: Optional[ElevationProvider],
     sample_interval_m: float,
     elevation_threshold: float,
-    vertex_tolerance_m: float,
     warnings: Optional[list[str]] = None,
 ) -> tuple[list[WaypointSchema], float]:
     """Ground mode: vertex waypoints at DEM break points + flight-line vertices."""
@@ -202,7 +227,7 @@ def _terrain_waypoints(
         for j in range(n):
             d = j * seg.length / (n - 1)
             positions[round(d, 3)] = False
-        for pt in seg.simplify(vertex_tolerance_m, preserve_topology=False).coords:
+        for pt in _path_vertices(seg):
             key = round(seg.project(Point(pt)), 3)
             positions.setdefault(key, True)
         start = len(samples)
@@ -227,7 +252,7 @@ def _terrain_waypoints(
                 "Elevation data unavailable — Ground (AGL) mode used vertex waypoints "
                 "at flight-line corners instead of terrain-adjusted samples."
             )
-        return _vertex_waypoints(segments, altitude, inverse, vertex_tolerance_m), 0.0
+        return _vertex_waypoints(segments, altitude, inverse), 0.0
 
     ref_ground = elevations[0]
     wps: list[WaypointSchema] = []
@@ -357,17 +382,14 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         dem_elevation_threshold = max(1.0, min(5.0, res * 0.17))
 
     if wp_mode == "photo":
-        vertex_tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
-        waypoints, photo_count = _photo_waypoints(segments, req.altitude, inverse, photo_spacing_m, vertex_tol)
+        waypoints, photo_count = _photo_waypoints(segments, req.altitude, inverse, photo_spacing_m)
     elif wp_mode == "vertex":
-        tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
-        waypoints = _vertex_waypoints(segments, req.altitude, inverse, tol)
+        waypoints = _vertex_waypoints(segments, req.altitude, inverse)
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
     else:  # terrain
-        tol = max(2.0, min(12.0, photo_spacing_m * 0.25))
         waypoints, _ = _terrain_waypoints(
             segments, req.altitude, inverse, elevation_provider,
-            dem_sample_interval, dem_elevation_threshold, tol, warnings,
+            dem_sample_interval, dem_elevation_threshold, warnings,
         )
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
 

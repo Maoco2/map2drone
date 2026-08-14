@@ -2,9 +2,12 @@ import json
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from pyproj import CRS, Transformer
+from shapely.geometry import LineString
 
 from app.core.database import Base, engine
 from app.main import app
+from app.modules.corridor.engine import _vertex_waypoints
 
 client = TestClient(app)
 
@@ -141,6 +144,28 @@ def test_api_corridor_closed_ring_matches_open_centerline():
     assert len(d2["waypoints"]) == len(d1["waypoints"])
     assert d2["corridor_length_m"] == d1["corridor_length_m"]
     assert d2["num_lines"] == d1["num_lines"]
+
+
+def test_vertex_waypoints_kept_at_minimal_direction_change():
+    """A waypoint must exist at every real vertex, even a tiny angle change."""
+    fwd = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(32630), always_xy=True)
+    inv = Transformer.from_crs(CRS.from_epsg(32630), CRS.from_epsg(4326), always_xy=True)
+    a = fwd.transform(-3.6000, 37.18000)
+    b = fwd.transform(-3.5800, 37.18001)  # ~1 m lateral: minimal direction change
+    c = fwd.transform(-3.5600, 37.18000)
+    seg = LineString([a, b, c])
+    wps = _vertex_waypoints([seg], 100.0, inv)
+    lon, lat = inv.transform(b[0], b[1])
+    assert any(abs(w.longitude - lon) < 1e-9 and abs(w.latitude - lat) < 1e-9 for w in wps)
+    assert len(wps) == 3  # entry + vertex + exit, none simplified away
+
+
+def test_vertex_waypoints_drop_only_collinear_points():
+    """Truly collinear interior points (no direction change) are still dropped."""
+    inv = Transformer.from_crs(CRS.from_epsg(32630), CRS.from_epsg(4326), always_xy=True)
+    seg = LineString([(500000, 4100000), (501000, 4100000), (502000, 4100000)])
+    wps = _vertex_waypoints([seg], 100.0, inv)
+    assert len(wps) == 2
 
 
 def test_api_corridor_short_centerline():
