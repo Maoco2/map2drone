@@ -235,6 +235,21 @@ export default function ExportPanel() {
           Export completed successfully
         </div>
       )}
+
+      <div
+        className="text-[10px] leading-snug rounded p-2 space-y-1"
+        style={{ color: '#ffb74d', backgroundColor: 'rgba(255,145,0,0.12)' }}
+      >
+        <div className="flex gap-1.5">
+          <span className="shrink-0">⚠</span>
+          <span>
+            Este plan es una propuesta de cálculo automático. Verifique las condiciones reales
+            de vuelo, obstáculos, restricciones de espacio aéreo y normativa aeronáutica local
+            antes de volar. El operador es responsable de la seguridad de personas, bienes y del
+            cumplimiento de la ley.
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
