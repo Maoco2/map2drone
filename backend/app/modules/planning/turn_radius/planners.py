@@ -1,9 +1,14 @@
 """Turn-radius planners for Area Grid and Linear Corridor.
 
-The planners turn a plan (``GridResponse`` / ``CorridorResponse``) — or in the
-export path, a plain list of waypoints — into a ``TurnPlanResult`` by
-reconstructing the flight lines and calling ``TurnRadiusEngine.plan_turn``
-once per transition between consecutive lines.
+The Area Grid planner reconstructs the flight lines and calls
+``TurnRadiusEngine.plan_turn`` once per transition between consecutive lines
+(serpentine U-turns).
+
+The Linear Corridor planner works per waypoint: every interior waypoint where
+the path changes direction (the incoming and outgoing segment headings differ
+by more than ``HEADING_TOLERANCE_DEG``) gets its own turn with its own angle
+and radius. A corridor with a single winding line therefore produces one turn
+per vertex, and each waypoint's radius can differ.
 
 Geometry is always projected (UTM, chosen from the centroid) so line
 separation, radii and turn points are metric.
@@ -11,16 +16,17 @@ separation, radii and turn points are metric.
 
 from __future__ import annotations
 
-import math
 from typing import Optional, Sequence
 
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 
 from app.modules.planning.turn_radius.engine import TurnRadiusEngine
 from app.modules.planning.turn_radius.geometry import (
+    heading_degrees,
     make_transformer,
     right_normal,
     signed_turn_angle,
+    turn_direction_for,
     utm_epsg_for,
 )
 from app.modules.planning.turn_radius.models import (
@@ -186,14 +192,21 @@ class GridTurnPlanner:
             turn_angle=180.0,
         )
         turns = _plan_transitions(self.engine, lines, headings, work, epsg, crs_name)
-        return self._assemble(work, MissionType.AREA_GRID, turns, group_indices, epsg, crs_name)
+
+        per_wp: dict[int, float] = {}
+        for i in range(len(turns)):
+            last_idx = group_indices.get(i, [])[-1] if group_indices.get(i) else None
+            if last_idx is not None:
+                per_wp[last_idx] = turns[i].radius_m
+
+        return self._assemble(work, MissionType.AREA_GRID, turns, per_wp, epsg, crs_name)
 
     @staticmethod
     def _assemble(
         inp: TurnRadiusInput,
         mission_type: MissionType,
         turns: list[TurnGeometryResult],
-        group_indices: dict,
+        per_wp: dict,
         epsg: int,
         crs_name: str,
     ) -> TurnPlanResult:
@@ -206,7 +219,7 @@ class GridTurnPlanner:
                 epsg=epsg,
                 crs_name=crs_name,
                 geometry=_mission_geometry(turns),
-                explanation="Fewer than two flight lines: no turns to plan.",
+                explanation="No turns to plan: the path has no direction changes.",
             )
 
         radius = 0.0
@@ -229,12 +242,6 @@ class GridTurnPlanner:
                     seen.add(w)
                     warnings.append(w)
 
-        per_wp: dict[int, float] = {}
-        for i in range(len(turns)):
-            last_idx = group_indices.get(i, [])[-1] if group_indices.get(i) else None
-            if last_idx is not None:
-                per_wp[last_idx] = turns[i].radius_m
-
         return TurnPlanResult(
             mission_type=mission_type.value,
             mode=inp.mode.value,
@@ -244,7 +251,7 @@ class GridTurnPlanner:
             turns=turns,
             per_waypoint_curve_size=per_wp,
             warnings=warnings,
-            explanation=(f"Uniform mission turn radius {radius:.2f} m (minimum across {len(turns)} turns)."),
+            explanation=(f"Mission turn radius {radius:.2f} m (minimum across {len(turns)} turns)."),
             geometry=_mission_geometry(turns),
             epsg=epsg,
             crs_name=crs_name,
@@ -254,62 +261,27 @@ class GridTurnPlanner:
 class CorridorTurnPlanner:
     """Plans turn radii for a Linear Corridor mission.
 
-    Uses the real corridor geometry (``flight_lines_geojson``) so turn angles
-    follow the corridor bends and line separation follows the actual offset
-    spacing.
+    Works directly from the corridor waypoints: for every interior waypoint the
+    incoming heading (segment i-1→i) is compared with the outgoing heading
+    (segment i→i+1). Where the path changes direction a turn is planned at that
+    waypoint, so a single-line corridor with bends produces one turn per
+    vertex, each with its own angle (and therefore its own radius).
     """
 
     def __init__(self, engine: Optional[TurnRadiusEngine] = None) -> None:
         self.engine = engine or TurnRadiusEngine()
 
-    def _segments_from_geojson(self, flight_lines_geojson: dict, epsg: int) -> list[LineString]:
-        transformer = make_transformer(4326, epsg)
-        segments: list[LineString] = []
-        for feat in flight_lines_geojson.get("features", []):
-            geom = feat.get("geometry", {})
-            coords = geom.get("coordinates", [])
-            if not coords or geom.get("type") != "LineString":
-                continue
-            pts = [transformer.transform(c[0], c[1]) for c in coords]
-            if len(pts) >= 2:
-                segments.append(LineString(pts))
-        return segments
-
-    @staticmethod
-    def _traversal(seg: LineString, reverse: bool) -> LineString:
-        coords = list(seg.coords)
-        if reverse:
-            coords = coords[::-1]
-        return LineString(coords)
-
     def plan(self, corridor, inp: Optional[TurnRadiusInput] = None) -> TurnPlanResult:
-        geom = getattr(corridor, "geometry", None)
-        if geom is None:
-            return self._empty(corridor, inp, "Corridor response has no geometry.")
-
         waypoints = corridor.waypoints
-        if waypoints:
-            epsg = utm_epsg_for(waypoints[0].longitude, waypoints[0].latitude)
-        else:
-            epsg = int(getattr(geom, "epsg_out", 4326) or 4326)
-        crs_name = str(getattr(geom, "crs_name", "WGS84"))
+        if not waypoints:
+            return self._empty(corridor, inp, "Corridor response has no waypoints.")
 
-        raw = self._segments_from_geojson(getattr(geom, "flight_lines_geojson", {}) or {}, epsg)
-        if len(raw) < 2:
-            return self._empty(corridor, inp, "Fewer than two flight lines: no turns to plan.")
-
-        # Serpentine traversal: odd segments are flown reversed.
-        traversal = [self._traversal(seg, i % 2 == 1) for i, seg in enumerate(raw)]
-        headings: list[float] = []
-        for line in traversal:
-            c0, c1 = line.coords[0], line.coords[1]
-            dx = c1[0] - c0[0]
-            dy = c1[1] - c0[1]
-            headings.append((math.degrees(math.atan2(dx, dy)) + 360.0) % 360.0)
+        epsg = utm_epsg_for(waypoints[0].longitude, waypoints[0].latitude)
+        transformer = make_transformer(4326, epsg)
+        zone = epsg - 32600 if epsg < 32700 else epsg - 32700
+        crs_name = f"WGS 84 / UTM zone {zone}"
 
         spacing = float(getattr(corridor, "line_spacing", 0) or 0)
-        if spacing <= 0:
-            spacing = _line_spacing_from(traversal)
         work = _resolved_input(
             inp,
             mission_type=MissionType.LINEAR_CORRIDOR,
@@ -318,27 +290,23 @@ class CorridorTurnPlanner:
             turn_angle=180.0,
         )
 
-        turns = _plan_transitions(self.engine, traversal, headings, work, epsg, crs_name)
-        per_wp = self._per_waypoint_mapping(waypoints, traversal, turns, epsg)
-        plan = GridTurnPlanner._assemble(work, MissionType.LINEAR_CORRIDOR, turns, {}, epsg, crs_name)
-        plan.per_waypoint_curve_size = per_wp
-        return plan
+        turns: list[TurnGeometryResult] = []
+        per_wp: dict[int, float] = {}
+        pts = [transformer.transform(w.longitude, w.latitude) for w in waypoints]
+        for i in range(1, len(pts) - 1):
+            h_in = heading_degrees(pts[i - 1], pts[i])
+            h_out = heading_degrees(pts[i], pts[i + 1])
+            angle = abs(signed_turn_angle(h_in, h_out))
+            if angle <= HEADING_TOLERANCE_DEG:
+                continue
+            direction = turn_direction_for(h_in, h_out)
+            turn = self.engine.plan_turn(
+                pts[i], h_in, h_out, angle, direction, work, epsg=epsg, crs_name=crs_name
+            )
+            turns.append(turn)
+            per_wp[i] = turn.radius_m
 
-    @staticmethod
-    def _per_waypoint_mapping(waypoints, traversal, turns, epsg) -> dict:
-        if not waypoints or not turns:
-            return {}
-        transformer = make_transformer(4326, epsg)
-        nearest: list[int] = []
-        for wp in waypoints:
-            pt = Point(transformer.transform(wp.longitude, wp.latitude))
-            d = [(pt.distance(line), i) for i, line in enumerate(traversal)]
-            nearest.append(min(d, key=lambda t: t[0])[1])
-        mapping: dict = {}
-        for i in range(len(nearest) - 1):
-            if nearest[i] != nearest[i + 1] and nearest[i] < len(turns):
-                mapping[i] = turns[nearest[i]].radius_m
-        return mapping
+        return GridTurnPlanner._assemble(work, MissionType.LINEAR_CORRIDOR, turns, per_wp, epsg, crs_name)
 
     @staticmethod
     def _empty(corridor, inp: Optional[TurnRadiusInput], reason: str) -> TurnPlanResult:

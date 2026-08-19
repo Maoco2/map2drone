@@ -47,6 +47,19 @@ def _line_feature(x0, y0, x1, y1):
     }
 
 
+def _serpentine_waypoints(lines):
+    """Waypoints tracing the serpentine flight path of the given lines."""
+    wps = []
+    for i, ((x0, y0), (x1, y1)) in enumerate(lines):
+        h = 90.0 if i % 2 == 0 else 270.0
+        if i % 2 == 1:
+            x0, x1 = x1, x0
+        for x, y in ((x0, y0), (x1, y1)):
+            lon, lat = _ll(x, y)
+            wps.append(WaypointSchema(latitude=lat, longitude=lon, altitude=100.0, heading=h))
+    return wps
+
+
 def _corridor_response(lines, spacing: float, waypoints=None):
     features = [_line_feature(x0, y0, x1, y1) for (x0, y0), (x1, y1) in lines]
     geometry = CorridorGeometry(
@@ -55,9 +68,7 @@ def _corridor_response(lines, spacing: float, waypoints=None):
         crs_name="WGS84",
     )
     if waypoints is None:
-        waypoints = [
-            WaypointSchema(latitude=lat, longitude=lon, altitude=100.0, heading=90.0) for lon, lat in [_ll(0, 0)]
-        ]
+        waypoints = _serpentine_waypoints(lines)
     return CorridorResponse(
         waypoints=waypoints,
         total_distance=1000.0,
@@ -152,8 +163,8 @@ def test_corridor_symmetric_valid():
     resp = _corridor_response([((0, 50), (300, 50)), ((0, -50), (300, -50))], spacing=100.0)
     plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8))
     assert plan.status == TurnStatus.VALID.value
-    assert plan.turn_count == 1
-    assert plan.turns[0].turn_angle_deg == pytest.approx(180.0, abs=1.0)
+    assert plan.turn_count == 2  # one 90° turn per corner waypoint
+    assert plan.turns[0].turn_angle_deg == pytest.approx(90.0, abs=1.0)
 
 
 def test_corridor_asymmetric_valid():
@@ -161,6 +172,7 @@ def test_corridor_asymmetric_valid():
     resp = _corridor_response([((0, 40), (300, 40)), ((0, -10), (300, -10))], spacing=50.0)
     plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8))
     assert plan.status == TurnStatus.VALID.value
+    assert plan.turn_count == 2
     assert plan.radius_m == pytest.approx(plan.turns[0].safe_radius_m)
 
 
@@ -168,17 +180,35 @@ def test_corridor_constrained_by_tight_spacing():
     resp = _corridor_response([((0, 15), (300, 15)), ((0, -15), (300, -15))], spacing=30.0)
     plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8))
     assert plan.status == TurnStatus.CONSTRAINED.value
+    assert plan.turn_count == 2
     assert plan.radius_m == pytest.approx((30.0 - 8.0) / 2.0)
+    assert plan.per_waypoint_curve_size == {1: plan.radius_m, 2: plan.radius_m}
+
+
+def test_corridor_single_line_bend_gets_turn():
+    # Single flight line with a bend: the vertex waypoint gets its own turn.
+    wps = [
+        WaypointSchema(latitude=lat, longitude=lon, altitude=100.0, heading=90.0)
+        for lon, lat in [_ll(0, 0), _ll(300, 0), _ll(300, 100)]
+    ]
+    resp = _corridor_response([((0, 0), (300, 0)), ((300, 0), (300, 100))], spacing=100.0, waypoints=wps)
+    plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8))
+    assert plan.turn_count == 1
+    assert plan.turns[0].turn_angle_deg == pytest.approx(90.0, abs=1.0)
+    assert plan.per_waypoint_curve_size == {1: plan.radius_m}
+    assert plan.status == TurnStatus.VALID.value
 
 
 def test_corridor_turn_angle_90():
-    # L-shaped: line0 east-west, line1 north-south sharing the corner.
+    # L-shaped single corner: one 90° turn at the corner waypoint.
+    wps = [
+        WaypointSchema(latitude=lat, longitude=lon, altitude=100.0, heading=90.0)
+        for lon, lat in [_ll(0, 50), _ll(300, 50), _ll(300, -50)]
+    ]
     resp = _corridor_response(
         [((0, 50), (300, 50)), ((300, 50), (300, -50))],
         spacing=50.0,
-        waypoints=[
-            WaypointSchema(latitude=37.0, longitude=-3.5, altitude=100.0, heading=90.0),
-        ],
+        waypoints=wps,
     )
     plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8, line_spacing_m=50.0))
     assert plan.turn_count == 1
@@ -223,7 +253,7 @@ def test_corridor_plan_mission_geometry():
     resp = _corridor_response([((0, 15), (300, 15)), ((0, -15), (300, -15))], spacing=30.0)
     plan = CorridorTurnPlanner().plan(resp, TurnRadiusInput(speed_ms=6.8))
     assert plan.geometry["type"] == "FeatureCollection"
-    assert len(plan.geometry["features"]) == 3
+    assert len(plan.geometry["features"]) == 2 * 3  # 2 corner turns x (arc + center + buffer)
 
 
 def test_no_turns_geometry_empty():

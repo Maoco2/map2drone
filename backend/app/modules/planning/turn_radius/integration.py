@@ -4,8 +4,9 @@ The LCHM exporter is NOT modified: it already serialises ``wp.curve_size``
 into the record curve-radius field. This adapter computes the mission turn
 radius with the engine/planners and writes it into every waypoint's
 ``curve_size`` before the exporter runs, mirroring the observed behaviour of
-the reference mission (uniform radius on all interior waypoints, exporter
-forces the first/last waypoints to zero).
+the reference mission (Area Grid: uniform radius on all interior waypoints,
+exporter forces the first/last waypoints to zero; Linear Corridor: one radius
+per interior waypoint where the path turns — waypoints can differ).
 
 Configuration lives in ``options["turn_radius"]``:
 
@@ -86,10 +87,10 @@ def compute_turn_radius_plan(
     """Compute a turn-radius plan without mutating ``waypoints``.
 
     ``cfg`` is the ``options["turn_radius"]`` config dict. With ``NONE`` or an
-    empty config the plan is ``None`` (no turns). For Linear Corridor the real
-    ``flight_lines_geojson`` is used when available; otherwise the planner
-    falls back to reconstructing straight lines from the waypoints (heading
-    groups), which is exact for straight corridors.
+    empty config the plan is ``None`` (no turns). Linear Corridor is planned
+    per waypoint (each interior waypoint where the path changes direction gets
+    its own turn/radius); Area Grid plans serpentine U-turns between flight
+    lines.
     """
     if not cfg:
         return None, []
@@ -101,16 +102,11 @@ def compute_turn_radius_plan(
     inp = _build_input(cfg, recommended_speed)
     engine = TurnRadiusEngine(dynamics=inp.drone_dynamics)
 
-    if mission_type == "LINEAR_CORRIDOR" and flight_lines_geojson:
+    if mission_type == "LINEAR_CORRIDOR":
         corridor = SimpleNamespace(
             waypoints=waypoints,
             line_spacing=float(line_spacing or 0),
             recommended_speed_ms=float(recommended_speed or 6.8),
-            geometry=SimpleNamespace(
-                flight_lines_geojson=flight_lines_geojson,
-                epsg_out=4326,
-                crs_name="WGS84",
-            ),
         )
         plan = CorridorTurnPlanner(engine).plan(corridor, inp)
     else:
@@ -139,17 +135,25 @@ def apply_turn_radii(
             wp.curve_size = 0.0
         return waypoints, None, []
 
+    mission_type = cfg.get("mission_type", "AREA_GRID")
     plan, warnings = compute_turn_radius_plan(
         waypoints,
         cfg,
-        mission_type=cfg.get("mission_type", "AREA_GRID"),
+        mission_type=mission_type,
         line_spacing=float(cfg.get("line_spacing_m", 0) or 0),
         recommended_speed=default_speed,
         flight_lines_geojson=cfg.get("flight_lines_geojson"),
     )
-    radius_used = plan.radius_m if plan is not None else 0.0
 
-    for wp in waypoints:
-        wp.curve_size = radius_used
+    if mission_type == "LINEAR_CORRIDOR" and plan is not None and plan.per_waypoint_curve_size:
+        # Per-waypoint radii: each interior waypoint where the path turns gets
+        # its own radius; straight-through waypoints are cleared.
+        per_wp = plan.per_waypoint_curve_size
+        for idx, wp in enumerate(waypoints):
+            wp.curve_size = per_wp.get(idx, 0.0)
+    else:
+        radius_used = plan.radius_m if plan is not None else 0.0
+        for wp in waypoints:
+            wp.curve_size = radius_used
 
     return waypoints, plan, warnings

@@ -17,6 +17,7 @@ from app.modules.planning.turn_radius.engine import TurnRadiusEngine
 from app.modules.planning.turn_radius.geometry import make_transformer, utm_epsg_for
 from app.modules.planning.turn_radius.integration import apply_turn_radii, compute_turn_radius_plan
 from app.modules.planning.turn_radius.models import TurnRadiusInput
+from app.schemas.schemas import WaypointSchema
 
 REFERENCE = Path(__file__).parent / "fixtures" / "litchi" / "real" / "area_grid_74_time5_curve.lchm"
 
@@ -112,30 +113,25 @@ def test_compute_turn_radius_plan_manual():
 
 
 def test_compute_turn_radius_plan_corridor_geometry():
-    wps = _grid_waypoints()
-    features = []
-    for (x0, y0), (x1, y1) in [((0, 15), (300, 15)), ((0, -15), (300, -15))]:
-        lon0, lat0 = _ll(x0, y0)
-        lon1, lat1 = _ll(x1, y1)
-        features.append(
-            {
-                "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": [[lon0, lat0], [lon1, lat1]]},
-                "properties": {"type": "scan"},
-            }
-        )
+    # Corridor waypoints trace the serpentine path of two lines at ±15 m
+    # (30 m spacing): one 90° corner turn per interior waypoint.
+    wps = [
+        WaypointSchema(latitude=lat, longitude=lon, altitude=100.0, heading=90.0)
+        for lon, lat in [_ll(0, 15), _ll(300, 15), _ll(300, -15), _ll(0, -15)]
+    ]
     plan, warnings = compute_turn_radius_plan(
         wps,
         {"mode": "AUTO", "speed_ms": 6.8},
         mission_type="LINEAR_CORRIDOR",
         line_spacing=30.0,
         recommended_speed=6.8,
-        flight_lines_geojson={"type": "FeatureCollection", "features": features},
+        flight_lines_geojson={"type": "FeatureCollection", "features": []},
     )
     assert plan is not None
     assert plan.mission_type == "LINEAR_CORRIDOR"
-    assert plan.turn_count == 1
+    assert plan.turn_count == 2
     assert plan.radius_m == pytest.approx((30.0 - 8.0) / 2.0)
+    assert plan.per_waypoint_curve_size == {1: plan.radius_m, 2: plan.radius_m}
 
 
 # ── LCHM export consumes curve_size ─────────────────────────────────────────
