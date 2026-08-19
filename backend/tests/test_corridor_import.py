@@ -90,9 +90,7 @@ def build_geopackage():
         "CREATE TABLE gpkg_spatial_ref_sys (srs_name TEXT, srs_id INTEGER PRIMARY KEY, "
         "organization TEXT, organization_coordsys_id INTEGER, definition TEXT, description TEXT)"
     )
-    conn.execute(
-        "INSERT INTO gpkg_spatial_ref_sys VALUES ('WGS 84',4326,'EPSG',4326,'','')"
-    )
+    conn.execute("INSERT INTO gpkg_spatial_ref_sys VALUES ('WGS 84',4326,'EPSG',4326,'','')")
     conn.execute(
         "CREATE TABLE gpkg_contents (table_name TEXT PRIMARY KEY, data_type TEXT, identifier TEXT, "
         "description TEXT, last_change TEXT, min_x REAL, min_y REAL, max_x REAL, max_y REAL, srs_id INTEGER)"
@@ -105,9 +103,7 @@ def build_geopackage():
         "CREATE TABLE gpkg_geometry_columns (table_name TEXT, column_name TEXT, "
         "geometry_type_name TEXT, srs_id INTEGER, z INTEGER, m INTEGER)"
     )
-    conn.execute(
-        "INSERT INTO gpkg_geometry_columns VALUES ('centerline','geom','LINESTRING',4326,0,0)"
-    )
+    conn.execute("INSERT INTO gpkg_geometry_columns VALUES ('centerline','geom','LINESTRING',4326,0,0)")
     conn.execute("CREATE TABLE centerline (id INTEGER PRIMARY KEY, geom BLOB)")
     conn.execute("INSERT INTO centerline (geom) VALUES (?)", (blob,))
     conn.commit()
@@ -215,11 +211,19 @@ def test_import_all_formats():
 
 def test_import_generates_mission():
     _ensure_db()
-    reg = client.post("/api/v1/auth/register", json={
-        "full_name": "Imp Test", "email": "imp@test.dev",
-        "password": "secret123", "country": "", "city": "",
-        "phone": "", "gender": "", "profession": "",
-    })
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Imp Test",
+            "email": "imp@test.dev",
+            "password": "secret123",
+            "country": "",
+            "city": "",
+            "phone": "",
+            "gender": "",
+            "profession": "",
+        },
+    )
     if reg.status_code != 200:
         login = client.post(
             "/api/v1/auth/login",

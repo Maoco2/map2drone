@@ -14,30 +14,28 @@ from app.core.photogrammetry.capture_interval import (
     compute_capture_interval,
     compute_minimum_plausible_agl,
 )
-from app.models.schemas import Camera, Drone
+from app.models.schemas import Drone
+from app.modules.planning.core.camera import get_camera_required
+from app.modules.planning.core.metrics import calculate_mission_metrics
+from app.modules.planning.core.photo_points import annotate_photo_points, photo_points_to_dicts
+from app.modules.planning.core.photogrammetry import calc_footprint, calc_gsd
+from app.modules.planning.core.spacing import calculate_line_spacing, calculate_photo_spacing
+from app.modules.planning.core.speed import calculate_recommended_speed
 from app.modules.planning.elevation import ElevationProvider, create_provider
+from app.modules.planning.turn_radius.integration import compute_turn_radius_plan
 from app.schemas.schemas import GridRequest, GridResponse, GSDRequest, GSDResponse, WaypointSchema
 
 # ---------------------------------------------------------------------------
 # Camera helpers
 # ---------------------------------------------------------------------------
 
-def _get_camera(db_session, camera_id: str) -> Camera | None:
-    return db_session.query(Camera).filter(Camera.id == camera_id).first()
-
-
-def calc_gsd(altitude_m: float, focal_length_mm: float, pixel_size_um: float) -> float:
-    return (altitude_m * pixel_size_um) / (focal_length_mm * 10)
-
-
-def calc_footprint(gsd: float, image_width_px: int, image_height_px: int) -> tuple[float, float]:
-    return gsd * image_width_px / 100, gsd * image_height_px / 100
+# `calc_gsd` / `calc_footprint` are re-exported from the Planning Core. They
+# remain importable from here (`app.modules.planning.engine`) for
+# backward compatibility with existing tests and callers.
 
 
 def compute_gsd(req: GSDRequest, db_session) -> GSDResponse:
-    camera = _get_camera(db_session, req.camera_id)
-    if not camera:
-        raise ValueError("Camera not found")
+    camera = get_camera_required(db_session, req.camera_id)
     gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
     fw, fh = calc_footprint(gsd, camera.image_width_px, camera.image_height_px)
     return GSDResponse(gsd=round(gsd, 4), footprint_width=round(fw, 2), footprint_height=round(fh, 2))
@@ -46,6 +44,7 @@ def compute_gsd(req: GSDRequest, db_session) -> GSDResponse:
 # ---------------------------------------------------------------------------
 # Coordinate helpers
 # ---------------------------------------------------------------------------
+
 
 def _extract_polygon_coords(polygon: dict) -> list[list[float]]:
     raw = polygon.get("coordinates", [[]])[0]
@@ -92,6 +91,7 @@ def _rotate_points(points: Sequence[Sequence[float]], angle_deg: float) -> list[
 # Line-polygon intersection (horizontal scan lines in local frame)
 # ---------------------------------------------------------------------------
 
+
 def _horizontal_segments_inside(polygon_m: Sequence[Sequence[float]], y: float) -> list[tuple[float, float]]:
     """Return (x_start, x_end) pairs where a horizontal line at *y* is inside *polygon_m*."""
     xs: list[float] = []
@@ -125,6 +125,7 @@ def _horizontal_segments_inside(polygon_m: Sequence[Sequence[float]], y: float) 
 # ---------------------------------------------------------------------------
 # Optimal sweep angle
 # ---------------------------------------------------------------------------
+
 
 def _estimate_total_distance(
     polygon_m: Sequence[Sequence[float]],
@@ -192,6 +193,7 @@ def _find_optimal_angle(
 # Main grid algorithm
 # ---------------------------------------------------------------------------
 
+
 def _point_inside_polygon(x: float, y: float, polygon: Sequence[Sequence[float]]) -> bool:
     """Ray casting test."""
     inside = False
@@ -210,10 +212,32 @@ def _point_inside_polygon(x: float, y: float, polygon: Sequence[Sequence[float]]
 # Scan line segment computation
 # ---------------------------------------------------------------------------
 
+
+def _flight_lines_to_geojson(segments: list[dict]) -> dict:
+    """EPSG:4326 FeatureCollection of the grid scan lines (one per segment)."""
+    features = []
+    for i, seg in enumerate(segments):
+        features.append(
+            {
+                "type": "Feature",
+                "id": f"cl_{i}",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[seg["entry_lng"], seg["entry_lat"]], [seg["exit_lng"], seg["exit_lat"]]],
+                },
+                "properties": {"type": "scan", "line": i},
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
+
+
 def _compute_line_segments(
-    poly_m: list[list[float]], sweep_deg: float,
-    line_spacing_m: float, photo_spacing_m: float,
-    center_lat: float, center_lon: float,
+    poly_m: list[list[float]],
+    sweep_deg: float,
+    line_spacing_m: float,
+    photo_spacing_m: float,
+    center_lat: float,
+    center_lon: float,
 ) -> tuple[list[dict], int]:
     """Compute scan line segments (entry/exit) for a given sweep angle.
 
@@ -251,17 +275,21 @@ def _compute_line_segments(
 
         heading = (90 - sweep_deg) % 360 if i % 2 == 0 else (90 - sweep_deg + 180) % 360
 
-        segments.append({
-            "i": i,
-            "entry_lat": entry_lat, "entry_lng": entry_lng,
-            "exit_lat": exit_lat, "exit_lng": exit_lng,
-            "heading": heading,
-            "seg_len": seg_len,
-            "num_photos": num_photos,
-            "y_rot": y,
-            "entry_x_rot": entry_x,
-            "exit_x_rot": exit_x,
-        })
+        segments.append(
+            {
+                "i": i,
+                "entry_lat": entry_lat,
+                "entry_lng": entry_lng,
+                "exit_lat": exit_lat,
+                "exit_lng": exit_lng,
+                "heading": heading,
+                "seg_len": seg_len,
+                "num_photos": num_photos,
+                "y_rot": y,
+                "entry_x_rot": entry_x,
+                "exit_x_rot": exit_x,
+            }
+        )
 
     return segments, num_lines
 
@@ -270,9 +298,13 @@ def _compute_line_segments(
 # Waypoint generation strategies
 # ---------------------------------------------------------------------------
 
+
 def _photo_waypoints_from_segments(
-    segments: list[dict], sweep_deg: float, altitude: float,
-    center_lat: float, center_lon: float,
+    segments: list[dict],
+    sweep_deg: float,
+    altitude: float,
+    center_lat: float,
+    center_lon: float,
     min_spacing_m: float = 0,
 ) -> list[WaypointSchema]:
     """Legacy mode: one waypoint per photo position."""
@@ -291,36 +323,52 @@ def _photo_waypoints_from_segments(
                 dy = (lat - wps[-1].latitude) * 111320
                 if math.sqrt(dx * dx + dy * dy) < min_spacing_m:
                     continue
-            wps.append(WaypointSchema(
-                latitude=lat, longitude=lng,
-                altitude=altitude, heading=seg["heading"],
-                action_type=1,
-            ))
+            wps.append(
+                WaypointSchema(
+                    latitude=lat,
+                    longitude=lng,
+                    altitude=altitude,
+                    heading=seg["heading"],
+                    action_type=1,
+                )
+            )
     return wps
 
 
 def _vertex_waypoints_from_segments(
-    segments: list[dict], altitude: float,
+    segments: list[dict],
+    altitude: float,
 ) -> list[WaypointSchema]:
     """Takeoff mode: two waypoints per scan line (entry + exit). No photo actions."""
     wps: list[WaypointSchema] = []
     for seg in segments:
-        wps.append(WaypointSchema(
-            latitude=seg["entry_lat"], longitude=seg["entry_lng"],
-            altitude=altitude, heading=seg["heading"],
-            action_type=-1,
-        ))
-        wps.append(WaypointSchema(
-            latitude=seg["exit_lat"], longitude=seg["exit_lng"],
-            altitude=altitude, heading=seg["heading"],
-            action_type=-1,
-        ))
+        wps.append(
+            WaypointSchema(
+                latitude=seg["entry_lat"],
+                longitude=seg["entry_lng"],
+                altitude=altitude,
+                heading=seg["heading"],
+                action_type=-1,
+            )
+        )
+        wps.append(
+            WaypointSchema(
+                latitude=seg["exit_lat"],
+                longitude=seg["exit_lng"],
+                altitude=altitude,
+                heading=seg["heading"],
+                action_type=-1,
+            )
+        )
     return wps
 
 
 def _terrain_waypoints_from_segments(
-    segments: list[dict], sweep_deg: float, altitude: float,
-    center_lat: float, center_lon: float,
+    segments: list[dict],
+    sweep_deg: float,
+    altitude: float,
+    center_lat: float,
+    center_lon: float,
     elevation_provider: Optional[ElevationProvider] = None,
     sample_interval_m: float = 10,
     elevation_threshold: float = 5,
@@ -370,7 +418,7 @@ def _terrain_waypoints_from_segments(
             adj_alt = altitude + (elev - ref_ground)
             sample_idx += 1
 
-            should_add = (j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold)
+            should_add = j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold
             if not should_add:
                 continue
 
@@ -381,13 +429,17 @@ def _terrain_waypoints_from_segments(
                     last_break_elev = elev
                     continue
 
-            wps.append(WaypointSchema(
-                latitude=lat, longitude=lng,
-                altitude=adj_alt, heading=hdg,
-                action_type=-1,
-                elevation_msnm=elev,
-                agl=altitude,
-            ))
+            wps.append(
+                WaypointSchema(
+                    latitude=lat,
+                    longitude=lng,
+                    altitude=adj_alt,
+                    heading=hdg,
+                    action_type=-1,
+                    elevation_msnm=elev,
+                    agl=altitude,
+                )
+            )
             if j != n - 1:
                 last_break_elev = elev
 
@@ -398,10 +450,9 @@ def _terrain_waypoints_from_segments(
 # Main grid entry point
 # ---------------------------------------------------------------------------
 
+
 def compute_grid(req: GridRequest, db_session) -> GridResponse:
-    camera = _get_camera(db_session, req.camera_id)
-    if not camera:
-        raise ValueError("Camera not found")
+    camera = get_camera_required(db_session, req.camera_id)
 
     drone = None
     recommended_speed_ms = 10.0
@@ -410,25 +461,22 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
 
     warnings: list[str] = []
 
-    # Shutter-limited speed
-    gsd_m = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um) / 100
-    shutter_factor = 1.0 if camera.shutter_type == "mechanical" else 0.5
-    v_shutter = gsd_m / (2.0 * camera.shutter_speed_s) * shutter_factor
-    recommended_speed_ms = v_shutter
-    if drone and drone.max_speed_ms:
-        recommended_speed_ms = min(v_shutter, drone.max_speed_ms)
+    # Shutter-limited speed (Planning Core)
+    gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
+    recommended_speed_ms = calculate_recommended_speed(
+        gsd,
+        camera.shutter_speed_s,
+        camera.shutter_type,
+        drone_max_speed_ms=drone.max_speed_ms if drone else None,
+    )
 
     # 1. Polygon in geographic coords
     poly_geo = _extract_polygon_coords(req.polygon)
 
-    gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
     fw, fh = calc_footprint(gsd, camera.image_width_px, camera.image_height_px)
 
-    overlap_lat = req.overlap_lateral / 100
-    overlap_frt = req.overlap_frontal / 100
-
-    line_spacing_m = fw * (1 - overlap_lat)
-    photo_spacing_m = fh * (1 - overlap_frt)
+    line_spacing_m = calculate_line_spacing(fw, req.overlap_lateral)
+    photo_spacing_m = calculate_photo_spacing(fh, req.overlap_frontal)
 
     # 2. Convert to local metres
     lats = [p[1] for p in poly_geo]
@@ -438,21 +486,35 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     poly_m = _lnglat_to_meters(poly_geo, center_lat, center_lon)
 
     # 3. Find sweep angle
-    sweep_deg = req.rotation_deg if req.rotation_deg is not None else _find_optimal_angle(poly_m, line_spacing_m, photo_spacing_m)
+    sweep_deg = (
+        req.rotation_deg
+        if req.rotation_deg is not None
+        else _find_optimal_angle(poly_m, line_spacing_m, photo_spacing_m)
+    )
 
     # 3b. For cross grid, generate both angles
     angle_a = sweep_deg
     angle_b = sweep_deg + 90 if req.grid_type == "cross" else None
 
     segments_a, lines_a = _compute_line_segments(
-        poly_m, angle_a, line_spacing_m, photo_spacing_m, center_lat, center_lon,
+        poly_m,
+        angle_a,
+        line_spacing_m,
+        photo_spacing_m,
+        center_lat,
+        center_lon,
     )
     all_segments = list(segments_a)
     total_lines = lines_a
 
     if angle_b is not None:
         segments_b, lines_b = _compute_line_segments(
-            poly_m, angle_b, line_spacing_m, photo_spacing_m, center_lat, center_lon,
+            poly_m,
+            angle_b,
+            line_spacing_m,
+            photo_spacing_m,
+            center_lat,
+            center_lon,
         )
         all_segments.extend(segments_b)
         total_lines += lines_b
@@ -474,11 +536,13 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     # 5. Generate waypoints
     min_wp_spacing = line_spacing_m
     if wp_mode == "photo":
-        waypoints = _photo_waypoints_from_segments(segments_a, angle_a, req.altitude, center_lat, center_lon,
-                                                     min_spacing_m=min_wp_spacing)
+        waypoints = _photo_waypoints_from_segments(
+            segments_a, angle_a, req.altitude, center_lat, center_lon, min_spacing_m=min_wp_spacing
+        )
         if angle_b is not None:
-            waypoints_b = _photo_waypoints_from_segments(segments_b, angle_b, req.altitude, center_lat, center_lon,
-                                                          min_spacing_m=min_wp_spacing)
+            waypoints_b = _photo_waypoints_from_segments(
+                segments_b, angle_b, req.altitude, center_lat, center_lon, min_spacing_m=min_wp_spacing
+            )
             waypoints.extend(waypoints_b)
         photo_count = len(waypoints)
     elif wp_mode == "vertex":
@@ -490,7 +554,11 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     else:  # "terrain"
         terrain_elevations: list[float] = []
         waypoints, ref_ground, elev_a = _terrain_waypoints_from_segments(
-            segments_a, angle_a, req.altitude, center_lat, center_lon,
+            segments_a,
+            angle_a,
+            req.altitude,
+            center_lat,
+            center_lon,
             elevation_provider=elevation_provider,
             sample_interval_m=dem_sample_interval,
             elevation_threshold=dem_elevation_threshold,
@@ -499,7 +567,11 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
         terrain_elevations.extend(elev_a)
         if angle_b is not None:
             waypoints_b, _, elev_b = _terrain_waypoints_from_segments(
-                segments_b, angle_b, req.altitude, center_lat, center_lon,
+                segments_b,
+                angle_b,
+                req.altitude,
+                center_lat,
+                center_lon,
                 elevation_provider=elevation_provider,
                 sample_interval_m=dem_sample_interval,
                 elevation_threshold=dem_elevation_threshold,
@@ -527,16 +599,34 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     if len(waypoints) < 2:
         raise ValueError("Polygon too small for the selected parameters")
 
-    # 6. Compute metrics
-    total_distance = 0.0
-    for k in range(1, len(waypoints)):
-        dx = (waypoints[k].longitude - waypoints[k - 1].longitude) * 111320 * math.cos(math.radians(waypoints[k].latitude))
-        dy = (waypoints[k].latitude - waypoints[k - 1].latitude) * 111320
-        total_distance += math.sqrt(dx * dx + dy * dy)
+    # 6. Compute metrics (Planning Core: UTM distance, real turn times when a
+    #    turn-radius plan is configured, otherwise the documented per-line
+    #    overhead fallback, unified battery requirements)
+    turn_plan = None
+    turn_radius_warnings: list[str] = []
+    if getattr(req, "turn_radius", None):
+        turn_plan, turn_radius_warnings = compute_turn_radius_plan(
+            waypoints,
+            req.turn_radius,
+            mission_type="AREA_GRID",
+            line_spacing=line_spacing_m,
+            recommended_speed=recommended_speed_ms,
+        )
 
-    estimated_time_sec = total_distance / recommended_speed_ms + total_lines * 5
-    battery_minutes = 25
-    battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
+    wps_geo_heading = [(w.longitude, w.latitude, w.heading) for w in waypoints]
+    metrics = calculate_mission_metrics(
+        wps_geo_heading,
+        speed_mps=recommended_speed_ms,
+        num_lines=total_lines,
+        turn_plan=turn_plan,
+        drone_flight_time_min=drone.flight_time_min if drone else None,
+    )
+    total_distance = metrics.total_distance_m
+    estimated_time_sec = metrics.total_time_s
+    battery_count = metrics.battery_count
+
+    # Authoritative output geometry + photo points (EPSG:4326)
+    photo_points = photo_points_to_dicts(annotate_photo_points(waypoints, recommended_speed_ms))
 
     # 6b. Universal capture interval recommendation (front overlap -> photo interval)
     # Terrain-follow uses a conservative minimum footprint computed from the
@@ -580,4 +670,8 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
             assumed_agl_m=ci_agl,
             assumed_footprint_length_m=fh_ci,
         ),
+        turn_radius_result=turn_plan.model_dump(mode="json") if turn_plan is not None else None,
+        turn_radius_warnings=turn_radius_warnings,
+        flight_lines_geojson=_flight_lines_to_geojson(all_segments),
+        photo_points=photo_points,
     )

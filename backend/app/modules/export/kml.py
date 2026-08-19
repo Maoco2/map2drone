@@ -1,10 +1,14 @@
 from __future__ import annotations
+
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
     gis_warnings,
 )
 from .models import MissionExportData
@@ -55,9 +59,9 @@ def _build_kml(mission: MissionExportData) -> str:
         _add_data(ed_home, "Altura", f"{home_alt:.1f} m MSL")
         pt = ET.SubElement(hm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
-        ET.SubElement(pt, "coordinates").text = (
-            f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{home_alt:.1f}"
-        )
+        ET.SubElement(
+            pt, "coordinates"
+        ).text = f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{home_alt:.1f}"
 
     # Flight route (LineString)
     if mission.waypoints:
@@ -68,8 +72,7 @@ def _build_kml(mission: MissionExportData) -> str:
         ET.SubElement(ls, "altitudeMode").text = alt_mode
         coords = ET.SubElement(ls, "coordinates")
         coord_pairs = " ".join(
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{_wp_alt_msl(wp):.1f}"
-            for wp in mission.waypoints
+            f"{wp.longitude:.7f},{wp.latitude:.7f},{_wp_alt_msl(wp):.1f}" for wp in mission.waypoints
         )
         coords.text = coord_pairs
 
@@ -101,9 +104,7 @@ def _build_kml(mission: MissionExportData) -> str:
             _add_data(ed, "Acción", str(wp.action_type))
         pt = ET.SubElement(pm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
-        ET.SubElement(pt, "coordinates").text = (
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{msl:.1f}"
-        )
+        ET.SubElement(pt, "coordinates").text = f"{wp.longitude:.7f},{wp.latitude:.7f},{msl:.1f}"
 
     raw = ET.tostring(root, encoding="unicode")
     return minidom.parseString(raw).toprettyxml(indent="  ")

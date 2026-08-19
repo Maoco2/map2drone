@@ -84,3 +84,4 @@ class MissionExportData(BaseModel):
     photo_spacing: float = 0
     battery_count: int = 0
     capture_interval_s: Optional[int] = None
+    options: dict = {}

@@ -7,9 +7,10 @@ import ProjectTree from '@/modules/projects/ProjectTree';
 import LayerPanel from './LayerPanel';
 import MissionPanel from '@/modules/missions/MissionPanel';
 import ExportPanel from '@/modules/export/ExportPanel';
+import OptimizerPanel from '@/modules/optimizer/OptimizerPanel';
 import AdSlot from '@/shared/components/AdSlot';
 
-type Tab = 'projects' | 'basemap' | 'missions' | 'export';
+type Tab = 'projects' | 'basemap' | 'missions' | 'export' | 'optimizer';
 
 export default function Sidebar() {
   const { activeTab, setActiveTab } = useSidebarStore();
@@ -22,6 +23,7 @@ export default function Sidebar() {
     { id: 'projects', label: 'Projects', icon: '📁' },
     { id: 'basemap', label: 'Basemap', icon: '🗺️' },
     { id: 'missions', label: 'Missions', icon: '✈️' },
+    { id: 'optimizer', label: 'Optimizer', icon: '🎯' },
     { id: 'export', label: 'Export', icon: '📤' },
   ];
 
@@ -68,6 +70,7 @@ export default function Sidebar() {
         {activeTab === 'projects' && <ProjectTree />}
         {activeTab === 'basemap' && <LayerPanel />}
         {activeTab === 'missions' && <MissionPanel />}
+        {activeTab === 'optimizer' && <OptimizerPanel />}
         {activeTab === 'export' && <ExportPanel />}
       </div>
       <AdSlot slotId="sidebar-banner" format="horizontal" className="px-2 py-1" />

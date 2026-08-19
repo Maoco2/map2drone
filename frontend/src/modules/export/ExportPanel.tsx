@@ -2,6 +2,8 @@ import { useEffect, useCallback, useRef } from 'react';
 import { api } from '@/shared/utils/api';
 import { useExportStore, buildExportData, COMPAT_COLORS } from './exportStore';
 import { useMissionStore } from '@/modules/missions/planningStore';
+import { useTurnRadiusStore } from '@/modules/planning/turnRadiusStore';
+import { buildTurnRadiusConfig, missionTypeLabel } from '@/shared/utils/turnRadius';
 import type { Drone } from '@/shared/types/project';
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -16,10 +18,13 @@ function downloadBlob(blob: Blob, filename: string) {
 export default function ExportPanel() {
   const {
     formats, selectedFormats, projectName, status, progress, error, checks,
+    lchmPathMode, lchmHeadingMode, lchmPhotoMode, lchmPhotoDistance,
     setFormats, setChecks, toggleFormat, selectAll, deselectAll,
     setProjectName, setStatus, setProgress, setError, reset,
+    setLchmPathMode, setLchmHeadingMode, setLchmPhotoMode, setLchmPhotoDistance,
   } = useExportStore();
   const gridResult = useMissionStore((s) => s.gridResult);
+  const lchmSelected = selectedFormats.includes('litchi_lchm');
 
   useEffect(() => {
     api.export.listFormats().then(setFormats).catch(() => {});
@@ -38,12 +43,52 @@ export default function ExportPanel() {
     }
     const droneId = useMissionStore.getState().droneId;
     const drone = dronesRef.current.find((d) => d.id === droneId);
+    const ci = gridResult.capture_interval;
+    let photoCapture: Record<string, unknown> | undefined;
+    if (lchmPhotoMode === 'TIME') {
+      const rec = ci?.recommended_interval_s;
+      if (rec != null) {
+        photoCapture = { mode: 'TIME', time_interval_s: rec };
+      }
+    } else if (lchmPhotoMode === 'DISTANCE') {
+      const dist = parseFloat(lchmPhotoDistance);
+      if (Number.isFinite(dist) && dist > 0) {
+        photoCapture = { mode: 'DISTANCE', distance_interval_m: dist };
+      }
+    }
+    const trState = useTurnRadiusStore.getState();
+    const variant = useMissionStore.getState().missionVariant;
+    const turnRadius = trState.mode !== 'NONE'
+      ? buildTurnRadiusConfig(
+          {
+            mode: trState.mode,
+            manualRadius: trState.manualRadius,
+            speedOverride: trState.speedOverride,
+            safetyFactor: trState.safetyFactor,
+            clearance: trState.clearance,
+            maxLatAccel: trState.maxLatAccel,
+            minRadius: trState.minRadius,
+            maxRadius: trState.maxRadius,
+          },
+          gridResult.recommended_speed_ms ?? 0,
+          {
+            mission_type: missionTypeLabel(variant),
+            line_spacing: gridResult.line_spacing ?? 0,
+            flight_lines_geojson: variant === 'corridor' ? gridResult.geometry?.flight_lines_geojson : undefined,
+          },
+        )
+      : undefined;
     return {
-      ...buildExportData(gridResult, projectName),
+      ...buildExportData(gridResult, projectName, {
+        path_mode: lchmPathMode,
+        heading_mode: lchmHeadingMode,
+        photo_capture: photoCapture,
+        turn_radius: turnRadius,
+      }),
       altitude_mode: useMissionStore.getState().altitudeMode,
       drone_name: drone?.name ?? droneId,
     };
-  }, [gridResult, projectName]);
+  }, [gridResult, projectName, lchmPathMode, lchmHeadingMode, lchmPhotoMode, lchmPhotoDistance]);
 
   useEffect(() => {
     if (!gridResult || selectedFormats.length === 0) return;
@@ -70,7 +115,10 @@ export default function ExportPanel() {
       if (selectedFormats.length === 1) {
         const blob = await api.export.format(selectedFormats[0], data);
         const fmt = formats.find((f) => f.id === selectedFormats[0]);
-        downloadBlob(blob, `${projectName}${fmt?.extension || '.dat'}`);
+        const filename = selectedFormats[0] === 'litchi_lchm'
+          ? `${projectName.replace(/[^A-Za-z0-9_.\- ]/g, '_').trim().replace(/[\s_]+/g, '_').toLowerCase()}_litchi.lchm`
+          : `${projectName}${fmt?.extension || '.dat'}`;
+        downloadBlob(blob, filename);
       } else {
         const blob = await api.export.multi({ ...data, formats: selectedFormats });
         downloadBlob(blob, `${projectName}_map2drone.zip`);
@@ -192,6 +240,128 @@ export default function ExportPanel() {
           })}
         </div>
       </div>
+
+      {lchmSelected && (
+        <div className="space-y-2 rounded border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            Litchi LCHM options
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs block" style={{ color: 'var(--color-text-secondary)' }}>
+              Path mode
+            </label>
+            <select
+              value={lchmPathMode}
+              onChange={(e) => setLchmPathMode(e.target.value)}
+              className="w-full px-2 py-1.5 text-xs rounded border"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            >
+              <option value="STRAIGHT">Recto (Straight)</option>
+              <option value="CURVED_TURNS">Curvo (Curved turns)</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs block" style={{ color: 'var(--color-text-secondary)' }}>
+              Heading mode
+            </label>
+            <select
+              value={lchmHeadingMode}
+              onChange={(e) => setLchmHeadingMode(e.target.value)}
+              className="w-full px-2 py-1.5 text-xs rounded border"
+              style={{
+                backgroundColor: 'var(--color-surface)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            >
+              <option value="FOLLOW_PATH">Seguir camino (Follow path)</option>
+              <option value="CUSTOM_POI">Personalizado (Custom / POI)</option>
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs block" style={{ color: 'var(--color-text-secondary)' }}>
+              Photo capture
+            </label>
+            <div className="space-y-1">
+              {[
+                ['NONE', 'Sin captura de fotos'],
+                ['TIME', 'Intervalo de tiempo'],
+                ['DISTANCE', 'Intervalo de distancia'],
+              ].map(([value, label]) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-2 text-xs rounded px-2 py-1 border"
+                  style={{
+                    backgroundColor: lchmPhotoMode === value ? 'rgba(79,140,255,0.12)' : 'transparent',
+                    borderColor: lchmPhotoMode === value ? '#4f8cff' : 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="lchmPhotoMode"
+                    value={value}
+                    checked={lchmPhotoMode === value}
+                    onChange={() => setLchmPhotoMode(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {lchmPhotoMode === 'TIME' && (
+              <div className="space-y-0.5 pt-1 text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                <div>
+                  Intervalo recomendado:{' '}
+                  <span className="font-mono" style={{ color: 'var(--color-text)' }}>
+                    {gridResult?.capture_interval?.ideal_interval_s != null
+                      ? `${gridResult.capture_interval.ideal_interval_s.toFixed(1)} s`
+                      : '—'}
+                  </span>{' '}
+                  (científico)
+                </div>
+                <div>
+                  Intervalo Litchi:{' '}
+                  <span className="font-mono" style={{ color: 'var(--color-text)' }}>
+                    {gridResult?.capture_interval?.recommended_interval_s != null
+                      ? `${gridResult.capture_interval.recommended_interval_s} s`
+                      : '—'}
+                  </span>{' '}
+                  (entero)
+                </div>
+              </div>
+            )}
+            {lchmPhotoMode === 'DISTANCE' && (
+              <div className="space-y-1 pt-1">
+                <label className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                  Distancia entre fotos (m)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={lchmPhotoDistance}
+                  onChange={(e) => setLchmPhotoDistance(e.target.value)}
+                  placeholder="p. ej. 20.5"
+                  className="w-full px-2 py-1.5 text-xs rounded border"
+                  style={{
+                    backgroundColor: 'var(--color-surface)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+          <div className="text-[10px] leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+            Nota: el intervalo científico de captura se calcula aparte; Litchi usa el intervalo
+            entero de tiempo o la distancia por foto seleccionados.
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="text-xs p-2 rounded" style={{ backgroundColor: 'rgba(255,0,0,0.1)', color: '#ff4444' }}>

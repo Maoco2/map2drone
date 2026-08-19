@@ -207,34 +207,46 @@ def test_terrain_incompatible_when_1s_insufficient():
 
 
 def _api_grid(altitude_mode: str = "takeoff"):
-    return client.post("/api/v1/planning/grid", json={
-        "polygon": {
-            "type": "Polygon",
-            "coordinates": [[[-3.60, 37.10], [-3.50, 37.10], [-3.50, 37.20], [-3.60, 37.20], [-3.60, 37.10]]],
+    return client.post(
+        "/api/v1/planning/grid",
+        json={
+            "polygon": {
+                "type": "Polygon",
+                "coordinates": [[[-3.60, 37.10], [-3.50, 37.10], [-3.50, 37.20], [-3.60, 37.20], [-3.60, 37.10]]],
+            },
+            "altitude": 100,
+            "overlap_frontal": 75,
+            "overlap_lateral": 65,
+            "camera_id": "cam-43-20mp",
+            "drone_id": "dji-m3e",
+            "altitude_mode": altitude_mode,
         },
-        "altitude": 100,
-        "overlap_frontal": 75,
-        "overlap_lateral": 65,
-        "camera_id": "cam-43-20mp",
-        "drone_id": "dji-m3e",
-        "altitude_mode": altitude_mode,
-    })
+    )
 
 
 def _api_corridor(altitude_mode: str = "takeoff"):
-    return client.post("/api/v1/planning/corridor", json={
-        "centerline": {
-            "type": "LineString",
-            "coordinates": [[-3.60, 37.18], [-3.585, 37.1803], [-3.57, 37.1802], [-3.555, 37.1797], [-3.54, 37.179]],
+    return client.post(
+        "/api/v1/planning/corridor",
+        json={
+            "centerline": {
+                "type": "LineString",
+                "coordinates": [
+                    [-3.60, 37.18],
+                    [-3.585, 37.1803],
+                    [-3.57, 37.1802],
+                    [-3.555, 37.1797],
+                    [-3.54, 37.179],
+                ],
+            },
+            "width_left": 120,
+            "width_right": 80,
+            "altitude": 100,
+            "overlap_frontal": 75,
+            "overlap_lateral": 65,
+            "camera_id": "cam-1-20mp",
+            "altitude_mode": altitude_mode,
         },
-        "width_left": 120,
-        "width_right": 80,
-        "altitude": 100,
-        "overlap_frontal": 75,
-        "overlap_lateral": 65,
-        "camera_id": "cam-1-20mp",
-        "altitude_mode": altitude_mode,
-    })
+    )
 
 
 def test_api_grid_returns_capture_interval():
@@ -251,6 +263,51 @@ def test_api_grid_returns_capture_interval():
         assert ci["effective_front_overlap"] >= ci["required_front_overlap"] - 1e-9
     if ci["status"] == STATUS_INCOMPATIBLE:
         assert ci["maximum_speed_for_1s"] is not None
+
+
+def test_api_grid_returns_flight_lines_geojson_and_photo_points():
+    Base.metadata.create_all(bind=engine)
+    resp = _api_grid(altitude_mode="photo")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    fl = data["flight_lines_geojson"]
+    assert fl is not None
+    assert fl["type"] == "FeatureCollection"
+    assert len(fl["features"]) == data["num_lines"]
+    for f in fl["features"]:
+        assert f["geometry"]["type"] == "LineString"
+        assert len(f["geometry"]["coordinates"]) >= 2
+        for lon, lat in f["geometry"]["coordinates"]:
+            assert isinstance(lon, float) and isinstance(lat, float)
+    pp = data["photo_points"]
+    assert len(pp) == len(data["waypoints"])
+    assert sum(1 for p in pp if p["capture"]) == data["photo_count"]
+    assert pp[0]["speed_ms"] == pytest.approx(data["recommended_speed_ms"], abs=0.01)
+
+
+def test_api_grid_with_turn_radius_attaches_plan_and_uses_real_turn_times():
+    Base.metadata.create_all(bind=engine)
+    req = {
+        "polygon": {
+            "type": "Polygon",
+            "coordinates": [[[-3.60, 37.10], [-3.50, 37.10], [-3.50, 37.20], [-3.60, 37.20], [-3.60, 37.10]]],
+        },
+        "altitude": 100,
+        "overlap_frontal": 75,
+        "overlap_lateral": 65,
+        "camera_id": "cam-43-20mp",
+        "drone_id": "dji-m3e",
+        "altitude_mode": "takeoff",
+        "turn_radius": {"mode": "AUTO", "mission_type": "AREA_GRID"},
+    }
+    resp = client.post("/api/v1/planning/grid", json=req)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    tr = data["turn_radius_result"]
+    assert tr is not None
+    assert tr["turn_count"] > 0
+    assert tr["radius_m"] > 0
+    assert data["estimated_time_sec"] > 0
 
 
 def test_api_corridor_returns_capture_interval():

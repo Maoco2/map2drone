@@ -1,16 +1,25 @@
 from __future__ import annotations
+
 import io
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from xml.dom import minidom
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult, ValidationError,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
-    has_elevation_data, has_heading_per_wp, has_multiple_actions, has_gimbal,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
+    ValidationError,
+    ValidationResult,
+    has_elevation_data,
+    has_gimbal,
+    has_heading_per_wp,
+    has_multiple_actions,
 )
-from .models import MissionExportData
 from .dji_wpml import _build_xml
+from .models import MissionExportData
 
 
 def _build_waylines_wpml(mission: MissionExportData) -> str:
@@ -81,47 +90,57 @@ class DjiKmzExporter(MissionExporter):
     def validate(self, mission: MissionExportData) -> ValidationResult:
         errors: list[ValidationError] = []
         if len(mission.waypoints) > 240:
-            errors.append(ValidationError(
-                field="waypoints",
-                message=f"DJI Pilot 2 soporta máximo 240 waypoints (se tienen {len(mission.waypoints)})"
-            ))
+            errors.append(
+                ValidationError(
+                    field="waypoints",
+                    message=f"DJI Pilot 2 soporta máximo 240 waypoints (se tienen {len(mission.waypoints)})",
+                )
+            )
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
     def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
         warnings: list[ExportWarning] = []
         if has_elevation_data(mission):
-            warnings.append(ExportWarning(
-                code="elevation_lost",
-                message=(
-                    "El KMZ de DJI no representa la elevación del terreno (MSL/AGL); "
-                    "las alturas se exportan como valores del modelo."
-                ),
-                fields=["elevation_msnm", "agl"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="elevation_lost",
+                    message=(
+                        "El KMZ de DJI no representa la elevación del terreno (MSL/AGL); "
+                        "las alturas se exportan como valores del modelo."
+                    ),
+                    fields=["elevation_msnm", "agl"],
+                )
+            )
         if has_heading_per_wp(mission):
-            warnings.append(ExportWarning(
-                code="heading_ignored",
-                message=(
-                    "La misión se exporta con headingMode=auto; el rumbo por waypoint "
-                    "no controla la orientación del dron."
-                ),
-                fields=["heading"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="heading_ignored",
+                    message=(
+                        "La misión se exporta con headingMode=auto; el rumbo por waypoint "
+                        "no controla la orientación del dron."
+                    ),
+                    fields=["heading"],
+                )
+            )
         if has_multiple_actions(mission):
-            warnings.append(ExportWarning(
-                code="actions_approximated",
-                message=(
-                    "Las acciones múltiples por waypoint se simplifican a disparo "
-                    "por intervalo estimado en modo de línea."
-                ),
-                fields=["actions"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="actions_approximated",
+                    message=(
+                        "Las acciones múltiples por waypoint se simplifican a disparo "
+                        "por intervalo estimado en modo de línea."
+                    ),
+                    fields=["actions"],
+                )
+            )
         if has_gimbal(mission):
-            warnings.append(ExportWarning(
-                code="gimbal_approximated",
-                message="El pitch/modo del gimbal no se transfiere de forma fiel.",
-                fields=["gimbal_pitch", "gimbal_mode"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="gimbal_approximated",
+                    message="El pitch/modo del gimbal no se transfiere de forma fiel.",
+                    fields=["gimbal_pitch", "gimbal_mode"],
+                )
+            )
         return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:

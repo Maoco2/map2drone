@@ -1,16 +1,19 @@
 from __future__ import annotations
+
 import io
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from xml.dom import minidom
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
     gis_warnings,
 )
 from .models import MissionExportData
-
 
 # Minimal SVG icons for KMZ
 HOME_ICON_SVG = """<?xml version="1.0" encoding="UTF-8"?>
@@ -81,9 +84,9 @@ def _build_kmz_kml(mission: MissionExportData) -> str:
         _add_data(ed, "Altura", f"{home_alt:.1f} m MSL")
         pt = ET.SubElement(pm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
-        ET.SubElement(pt, "coordinates").text = (
-            f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{home_alt:.1f}"
-        )
+        ET.SubElement(
+            pt, "coordinates"
+        ).text = f"{mission.home.longitude:.7f},{mission.home.latitude:.7f},{home_alt:.1f}"
 
     # Route
     if mission.waypoints:
@@ -92,10 +95,7 @@ def _build_kmz_kml(mission: MissionExportData) -> str:
         ET.SubElement(route, "styleUrl").text = "#lineStyle"
         ls = ET.SubElement(route, "LineString")
         ET.SubElement(ls, "altitudeMode").text = alt_mode
-        parts = " ".join(
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{_wp_alt_msl(wp):.1f}"
-            for wp in mission.waypoints
-        )
+        parts = " ".join(f"{wp.longitude:.7f},{wp.latitude:.7f},{_wp_alt_msl(wp):.1f}" for wp in mission.waypoints)
         ET.SubElement(ls, "coordinates").text = parts
 
     # Waypoints
@@ -126,9 +126,7 @@ def _build_kmz_kml(mission: MissionExportData) -> str:
             _add_data(ed, "Acción", str(wp.action_type))
         pt = ET.SubElement(pm, "Point")
         ET.SubElement(pt, "altitudeMode").text = alt_mode
-        ET.SubElement(pt, "coordinates").text = (
-            f"{wp.longitude:.7f},{wp.latitude:.7f},{msl:.1f}"
-        )
+        ET.SubElement(pt, "coordinates").text = f"{wp.longitude:.7f},{wp.latitude:.7f},{msl:.1f}"
 
     raw = ET.tostring(root, encoding="unicode")
     return minidom.parseString(raw).toprettyxml(indent="  ")

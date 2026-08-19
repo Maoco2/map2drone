@@ -11,12 +11,14 @@ from typing import Optional
 
 try:
     from PIL import Image
+
     HAS_PILLOW = True
 except ImportError:
     HAS_PILLOW = False
 
 try:
     import tifffile
+
     HAS_TIFFFILE = True
 except ImportError:
     HAS_TIFFFILE = False
@@ -26,12 +28,10 @@ class ElevationProvider(ABC):
     """Abstract elevation data provider."""
 
     @abstractmethod
-    def get_elevations(self, points: list[tuple[float, float]]) -> list[float]:
-        ...
+    def get_elevations(self, points: list[tuple[float, float]]) -> list[float]: ...
 
     @abstractmethod
-    def display_name(self) -> str:
-        ...
+    def display_name(self) -> str: ...
 
     def description(self) -> str:
         return self.display_name()
@@ -78,13 +78,13 @@ class MapboxTerrainRgbProvider(ElevationProvider):
         self._cache: dict[tuple[int, int, int], bytes] = {}
 
     def _tile_coords(self, lat: float, lng: float) -> tuple[int, int, int]:
-        n = 2.0 ** self.ZOOM
+        n = 2.0**self.ZOOM
         x = (lng + 180.0) / 360.0 * n
         y = (1.0 - math.log(math.tan(math.radians(lat)) + 1.0 / math.cos(math.radians(lat))) / math.pi) / 2.0 * n
         return self.ZOOM, int(x), int(y)
 
     def _pixel_pos(self, lat: float, lng: float, tx: int, ty: int) -> tuple[int, int]:
-        n = 2.0 ** self.ZOOM
+        n = 2.0**self.ZOOM
         x = (lng + 180.0) / 360.0 * n
         y = (1.0 - math.log(math.tan(math.radians(lat)) + 1.0 / math.cos(math.radians(lat))) / math.pi) / 2.0 * n
         px = int((x - tx) * self.TILE_SIZE)
@@ -96,10 +96,7 @@ class MapboxTerrainRgbProvider(ElevationProvider):
         data = self._cache.get(key)
         if data is not None:
             return data
-        url = (
-            f"https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}@2x.pngraw"
-            f"?access_token={self.token}"
-        )
+        url = f"https://api.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}@2x.pngraw?access_token={self.token}"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Map2Drone/1.0"})
             with urllib.request.urlopen(req, timeout=30) as resp:
@@ -214,20 +211,24 @@ class OpenTopographyProvider(ElevationProvider):
         dr = r - r0
         dc = c - c0
         return (
-            arr[r0, c0] * (1 - dr) * (1 - dc) +
-            arr[r0, c1] * (1 - dr) * dc +
-            arr[r1, c0] * dr * (1 - dc) +
-            arr[r1, c1] * dr * dc
+            arr[r0, c0] * (1 - dr) * (1 - dc)
+            + arr[r0, c1] * (1 - dr) * dc
+            + arr[r1, c0] * dr * (1 - dc)
+            + arr[r1, c1] * dr * dc
         )
 
     def _fetch_tiff(self, south: float, north: float, west: float, east: float) -> Optional[bytes]:
-        params = urllib.parse.urlencode({
-            "demtype": self.demtype,
-            "south": south, "north": north,
-            "west": west, "east": east,
-            "outputFormat": "GTiff",
-            "API_Key": self.api_key,
-        })
+        params = urllib.parse.urlencode(
+            {
+                "demtype": self.demtype,
+                "south": south,
+                "north": north,
+                "west": west,
+                "east": east,
+                "outputFormat": "GTiff",
+                "API_Key": self.api_key,
+            }
+        )
         url = f"{self.BASE_URL}?{params}"
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Map2Drone/1.0"})

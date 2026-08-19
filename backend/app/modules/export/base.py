@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any
+
 from pydantic import BaseModel
+
 from .models import MissionExportData
 
 
@@ -71,11 +73,11 @@ class MissionExporter(ABC):
         return []
 
     @abstractmethod
-    def export(self, mission: MissionExportData) -> ExportResult:
-        ...
+    def export(self, mission: MissionExportData) -> ExportResult: ...
 
 
 # ── Shared compatibility helpers ────────────────────────────────────────────
+
 
 def has_elevation_data(mission: MissionExportData) -> bool:
     return any(wp.elevation_msnm is not None or wp.agl is not None for wp in mission.waypoints)
@@ -83,9 +85,7 @@ def has_elevation_data(mission: MissionExportData) -> bool:
 
 def has_gimbal(mission: MissionExportData) -> bool:
     return any(
-        (wp.gimbal_pitch is not None and wp.gimbal_pitch != -90)
-        or wp.gimbal_mode != 2
-        for wp in mission.waypoints
+        (wp.gimbal_pitch is not None and wp.gimbal_pitch != -90) or wp.gimbal_mode != 2 for wp in mission.waypoints
     )
 
 
@@ -118,21 +118,27 @@ def gis_warnings(mission: MissionExportData) -> list[ExportWarning]:
         )
     ]
     if has_multiple_actions(mission):
-        warnings.append(ExportWarning(
-            code="actions_lost",
-            message="Las acciones de cámara/gimbal por waypoint no se representan.",
-            fields=["actions"],
-        ))
+        warnings.append(
+            ExportWarning(
+                code="actions_lost",
+                message="Las acciones de cámara/gimbal por waypoint no se representan.",
+                fields=["actions"],
+            )
+        )
     if has_gimbal(mission):
-        warnings.append(ExportWarning(
-            code="gimbal_lost",
-            message="El pitch y modo del gimbal no se representan.",
-            fields=["gimbal_pitch", "gimbal_mode"],
-        ))
+        warnings.append(
+            ExportWarning(
+                code="gimbal_lost",
+                message="El pitch y modo del gimbal no se representan.",
+                fields=["gimbal_pitch", "gimbal_mode"],
+            )
+        )
     if has_terrain_following(mission):
-        warnings.append(ExportWarning(
-            code="terrain_following_lost",
-            message="El seguimiento de terreno (terrain following) no es ejecutable.",
-            fields=["terrain_following"],
-        ))
+        warnings.append(
+            ExportWarning(
+                code="terrain_following_lost",
+                message="El seguimiento de terreno (terrain following) no es ejecutable.",
+                fields=["terrain_following"],
+            )
+        )
     return warnings

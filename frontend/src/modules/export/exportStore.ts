@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ExportFormat, ExportFormatCheckItem, ExportWaypoint, GridResult } from '@/shared/types/project';
+import type { ExportFormat, ExportFormatCheckItem, ExportWaypoint, GridResult, TurnRadiusConfig } from '@/shared/types/project';
 
 interface ExportState {
   formats: ExportFormat[];
@@ -9,6 +9,10 @@ interface ExportState {
   progress: number;
   error: string | null;
   checks: Record<string, ExportFormatCheckItem>;
+  lchmPathMode: string;
+  lchmHeadingMode: string;
+  lchmPhotoMode: string;
+  lchmPhotoDistance: string;
 
   setFormats: (fmts: ExportFormat[]) => void;
   setChecks: (items: ExportFormatCheckItem[]) => void;
@@ -19,6 +23,10 @@ interface ExportState {
   setStatus: (s: 'idle' | 'exporting' | 'done' | 'error') => void;
   setProgress: (p: number) => void;
   setError: (e: string | null) => void;
+  setLchmPathMode: (m: string) => void;
+  setLchmHeadingMode: (m: string) => void;
+  setLchmPhotoMode: (m: string) => void;
+  setLchmPhotoDistance: (d: string) => void;
   reset: () => void;
 }
 
@@ -30,6 +38,10 @@ export const useExportStore = create<ExportState>((set, get) => ({
   progress: 0,
   error: null,
   checks: {},
+  lchmPathMode: 'STRAIGHT',
+  lchmHeadingMode: 'FOLLOW_PATH',
+  lchmPhotoMode: 'NONE',
+  lchmPhotoDistance: '',
 
   setFormats: (formats) => set({ formats }),
   setChecks: (items) => {
@@ -53,6 +65,10 @@ export const useExportStore = create<ExportState>((set, get) => ({
   setStatus: (status) => set({ status }),
   setProgress: (progress) => set({ progress }),
   setError: (error) => set({ error }),
+  setLchmPathMode: (lchmPathMode) => set({ lchmPathMode }),
+  setLchmHeadingMode: (lchmHeadingMode) => set({ lchmHeadingMode }),
+  setLchmPhotoMode: (lchmPhotoMode) => set({ lchmPhotoMode }),
+  setLchmPhotoDistance: (lchmPhotoDistance) => set({ lchmPhotoDistance }),
   reset: () => set({
     selectedFormats: [],
     status: 'idle',
@@ -70,9 +86,15 @@ export const COMPAT_COLORS: Record<string, string> = {
   gis_only: '#9e9e9e',
 };
 
-export function buildExportData(gridResult: GridResult, projectName: string) {
+export function buildExportData(gridResult: GridResult, projectName: string, options?: { path_mode?: string; heading_mode?: string; photo_capture?: Record<string, unknown>; turn_radius?: TurnRadiusConfig }) {
   return {
     project_name: projectName,
+    options: {
+      path_mode: options?.path_mode ?? 'STRAIGHT',
+      heading_mode: options?.heading_mode ?? 'FOLLOW_PATH',
+      ...(options?.photo_capture ? { photo_capture: options.photo_capture } : {}),
+      ...(options?.turn_radius ? { turn_radius: options.turn_radius } : {}),
+    },
     waypoints: (gridResult.waypoints || []).map((wp) => ({
       latitude: wp.latitude,
       longitude: wp.longitude,

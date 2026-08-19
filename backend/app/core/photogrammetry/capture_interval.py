@@ -197,28 +197,20 @@ def build_capture_interval_block(
     """
     return CaptureIntervalBlock(
         status=ci.status,
-        required_photo_spacing_m=(
-            round(ci.required_photo_spacing_m, 3) if ci.required_photo_spacing_m > 0 else None
-        ),
+        required_photo_spacing_m=(round(ci.required_photo_spacing_m, 3) if ci.required_photo_spacing_m > 0 else None),
         ideal_interval_s=round(ci.ideal_interval_s, 3) if ci.ideal_interval_s is not None else None,
         recommended_interval_s=ci.recommended_interval_s,
-        actual_photo_spacing_m=(
-            round(ci.actual_photo_spacing_m, 3) if ci.actual_photo_spacing_m is not None else None
-        ),
+        actual_photo_spacing_m=(round(ci.actual_photo_spacing_m, 3) if ci.actual_photo_spacing_m is not None else None),
         effective_front_overlap=(
-            round(ci.effective_front_overlap * 100.0, 2)
-            if ci.effective_front_overlap is not None else None
+            round(ci.effective_front_overlap * 100.0, 2) if ci.effective_front_overlap is not None else None
         ),
         required_front_overlap=ci.required_front_overlap,
         speed_mps=round(ci.speed_mps, 2),
-        maximum_speed_for_1s=(
-            round(ci.maximum_speed_for_1s, 2) if ci.maximum_speed_for_1s is not None else None
-        ),
+        maximum_speed_for_1s=(round(ci.maximum_speed_for_1s, 2) if ci.maximum_speed_for_1s is not None else None),
         planned_agl_m=planned_agl_m,
         terrain_follow=terrain_follow,
         assumed_agl_m=assumed_agl_m,
         assumed_footprint_length_m=(
-            round(assumed_footprint_length_m, 3)
-            if assumed_footprint_length_m is not None else None
+            round(assumed_footprint_length_m, 3) if assumed_footprint_length_m is not None else None
         ),
     )

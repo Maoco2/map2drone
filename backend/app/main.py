@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api.v1.endpoints import init_db
+from app.api.v1.endpoints import router as v1_router
 from app.core.config import CORS_ORIGINS, PROJECT_NAME, VERSION
-from app.api.v1.endpoints import router as v1_router, init_db
 
 app = FastAPI(title=PROJECT_NAME, version=VERSION)
 

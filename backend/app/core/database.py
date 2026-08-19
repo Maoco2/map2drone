@@ -1,4 +1,5 @@
 import os
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -17,6 +18,7 @@ engine = create_engine(
 
 
 if _is_sqlite:
+
     @event.listens_for(engine, "connect")
     def _enable_spatialite(dbapi_connection, connection_record):
         dbapi_connection.enable_load_extension(True)

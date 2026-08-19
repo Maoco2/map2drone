@@ -1,10 +1,14 @@
 from __future__ import annotations
-from typing import Any
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
-    has_multiple_actions, has_gimbal, has_terrain_following,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
+    has_gimbal,
+    has_multiple_actions,
+    has_terrain_following,
 )
 from .models import MissionExportData
 
@@ -57,9 +61,7 @@ def _build_waypoints(mission: MissionExportData) -> str:
     if mission.home:
         lat = mission.home.latitude
         lng = mission.home.longitude
-        lines.append(
-            f"{seq}\t1\t0\t16\t0\t0\t0\t0\t{mission.altitude:.1f}\t{lat:.7f}\t{lng:.7f}\t1"
-        )
+        lines.append(f"{seq}\t1\t0\t16\t0\t0\t0\t0\t{mission.altitude:.1f}\t{lat:.7f}\t{lng:.7f}\t1")
         seq += 1
 
     # Takeoff
@@ -73,26 +75,24 @@ def _build_waypoints(mission: MissionExportData) -> str:
         # DO_SET_CAM_TRIGG_DIST before scan line entry
         if i in trig_start_indices and mission.photo_spacing > 0:
             lines.append(
-                f"{seq}\t0\t3\t206\t{mission.photo_spacing:.1f}\t0\t0\t0\t{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1"
+                f"{seq}\t0\t3\t206\t{mission.photo_spacing:.1f}\t0\t0\t0\t"
+                f"{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1"
             )
             seq += 1
         lines.append(
-            f"{seq}\t0\t3\t16\t{wp.curve_size:.1f}\t{wp.speed or mission.speed_ms:.1f}\t0\t0\t{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1"
+            f"{seq}\t0\t3\t16\t{wp.curve_size:.1f}\t{wp.speed or mission.speed_ms:.1f}\t0\t0\t"
+            f"{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1"
         )
         seq += 1
         # DO_SET_CAM_TRIGG_DIST=0 after scan line exit
         if i in trig_stop_indices:
-            lines.append(
-                f"{seq}\t0\t3\t206\t0\t0\t0\t0\t{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1"
-            )
+            lines.append(f"{seq}\t0\t3\t206\t0\t0\t0\t0\t{wp.altitude:.1f}\t{wp.latitude:.7f}\t{wp.longitude:.7f}\t1")
             seq += 1
 
     # Land
     if mission.waypoints:
         last = mission.waypoints[-1]
-        lines.append(
-            f"{seq}\t0\t3\t21\t0\t0\t0\t0\t{last.altitude:.1f}\t{last.latitude:.7f}\t{last.longitude:.7f}\t1"
-        )
+        lines.append(f"{seq}\t0\t3\t21\t0\t0\t0\t0\t{last.altitude:.1f}\t{last.latitude:.7f}\t{last.longitude:.7f}\t1")
         seq += 1
 
     raw = "\n".join(lines)
@@ -117,27 +117,33 @@ class MissionPlannerExporter(MissionExporter):
     def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
         warnings: list[ExportWarning] = []
         if has_gimbal(mission):
-            warnings.append(ExportWarning(
-                code="gimbal_lost",
-                message="El formato no representa pitch/modo de gimbal por waypoint.",
-                fields=["gimbal_pitch", "gimbal_mode"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="gimbal_lost",
+                    message="El formato no representa pitch/modo de gimbal por waypoint.",
+                    fields=["gimbal_pitch", "gimbal_mode"],
+                )
+            )
         if has_multiple_actions(mission):
-            warnings.append(ExportWarning(
-                code="actions_approximated",
-                message=(
-                    "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
-                    "al inicio/fin de cada scanline; las acciones exactas por waypoint "
-                    "no se transfieren."
-                ),
-                fields=["actions", "action_type", "action_param"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="actions_approximated",
+                    message=(
+                        "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
+                        "al inicio/fin de cada scanline; las acciones exactas por waypoint "
+                        "no se transfieren."
+                    ),
+                    fields=["actions", "action_type", "action_param"],
+                )
+            )
         if has_terrain_following(mission):
-            warnings.append(ExportWarning(
-                code="terrain_following_lost",
-                message="El archivo no activa seguimiento de terreno; se exportan alturas fijas.",
-                fields=["terrain_following"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="terrain_following_lost",
+                    message="El archivo no activa seguimiento de terreno; se exportan alturas fijas.",
+                    fields=["terrain_following"],
+                )
+            )
         return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:

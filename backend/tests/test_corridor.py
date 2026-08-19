@@ -51,6 +51,7 @@ def _req(**kw):
 def _ensure_db():
     Base.metadata.create_all(bind=engine)
     from app.api.v1.endpoints import init_db
+
     init_db()
 
 
@@ -87,6 +88,21 @@ def test_api_corridor_photo():
         assert wp["action_type"] in (1, -1)
 
 
+def test_api_corridor_photo_points():
+    _ensure_db()
+    resp = client.post("/api/v1/planning/corridor", json=_req(altitude_mode="photo"))
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    pp = data["photo_points"]
+    assert len(pp) == len(data["waypoints"])
+    assert sum(1 for p in pp if p["capture"]) == data["photo_count"]
+    for p in pp:
+        assert "index" in p and "latitude" in p and "longitude" in p
+        assert "altitude_m" in p and "distance_along_line_m" in p
+        assert "speed_ms" in p and "heading_deg" in p and "capture" in p
+        assert p["distance_along_line_m"] >= 0
+
+
 def test_api_corridor_photo_includes_flight_line_vertices():
     _ensure_db()
     resp = client.post("/api/v1/planning/corridor", json=_req(altitude_mode="photo"))
@@ -97,14 +113,8 @@ def test_api_corridor_photo_includes_flight_line_vertices():
     last = line_coords[-1]
     wps = data["waypoints"]
     tol = 0.0005
-    assert any(
-        abs(wp["longitude"] - first[0]) < tol and abs(wp["latitude"] - first[1]) < tol
-        for wp in wps
-    )
-    assert any(
-        abs(wp["longitude"] - last[0]) < tol and abs(wp["latitude"] - last[1]) < tol
-        for wp in wps
-    )
+    assert any(abs(wp["longitude"] - first[0]) < tol and abs(wp["latitude"] - first[1]) < tol for wp in wps)
+    assert any(abs(wp["longitude"] - last[0]) < tol and abs(wp["latitude"] - last[1]) < tol for wp in wps)
 
 
 def test_api_corridor_terrain():
@@ -174,9 +184,11 @@ def test_boustrophedon_return_line_reversed():
     cl = {"type": "LineString", "coordinates": [[-3.6000, 37.1800], [-3.5600, 37.1800]]}
     base = {
         "centerline": cl,
-        "width_left": 40, "width_right": 40,
+        "width_left": 40,
+        "width_right": 40,
         "altitude": 100,
-        "overlap_frontal": 75, "overlap_lateral": 65,
+        "overlap_frontal": 75,
+        "overlap_lateral": 65,
         "camera_id": "cam-1-20mp",
     }
     for am in ("photo", "ground"):
@@ -238,11 +250,19 @@ def test_api_corridor_no_camera():
 
 def test_api_corridor_creates_mission():
     _ensure_db()
-    reg = client.post("/api/v1/auth/register", json={
-        "full_name": "Corr Test", "email": "corr@test.dev",
-        "password": "secret123", "country": "", "city": "",
-        "phone": "", "gender": "", "profession": "",
-    })
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Corr Test",
+            "email": "corr@test.dev",
+            "password": "secret123",
+            "country": "",
+            "city": "",
+            "phone": "",
+            "gender": "",
+            "profession": "",
+        },
+    )
     if reg.status_code != 200:
         login = client.post("/api/v1/auth/login", json={"email": "corr@test.dev", "password": "secret123"})
         assert login.status_code == 200

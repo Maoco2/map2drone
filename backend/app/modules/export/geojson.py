@@ -1,10 +1,14 @@
 from __future__ import annotations
+
 import json
 from typing import Any
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
     gis_warnings,
 )
 from .models import MissionExportData
@@ -15,55 +19,61 @@ def _build_geojson(mission: MissionExportData) -> str:
 
     # Home point
     if mission.home:
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [mission.home.longitude, mission.home.latitude, mission.altitude],
-            },
-            "properties": {
-                "name": "Home Point",
-                "type": "home",
-                "altitude": mission.altitude,
-            },
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [mission.home.longitude, mission.home.latitude, mission.altitude],
+                },
+                "properties": {
+                    "name": "Home Point",
+                    "type": "home",
+                    "altitude": mission.altitude,
+                },
+            }
+        )
 
     # Waypoints as Point features
     for i, wp in enumerate(mission.waypoints):
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [wp.longitude, wp.latitude, wp.altitude],
-            },
-            "properties": {
-                "name": f"Waypoint {i + 1}",
-                "type": "waypoint",
-                "index": i,
-                "altitude": wp.altitude,
-                "heading": wp.heading,
-                "speed": wp.speed or mission.speed_ms,
-                "action_type": wp.action_type,
-                "action_param": wp.action_param,
-            },
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [wp.longitude, wp.latitude, wp.altitude],
+                },
+                "properties": {
+                    "name": f"Waypoint {i + 1}",
+                    "type": "waypoint",
+                    "index": i,
+                    "altitude": wp.altitude,
+                    "heading": wp.heading,
+                    "speed": wp.speed or mission.speed_ms,
+                    "action_type": wp.action_type,
+                    "action_param": wp.action_param,
+                },
+            }
+        )
 
     # Flight route as LineString
     if len(mission.waypoints) >= 2:
         coords = [[wp.longitude, wp.latitude, wp.altitude] for wp in mission.waypoints]
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "LineString",
-                "coordinates": coords,
-            },
-            "properties": {
-                "name": "Flight Route",
-                "type": "route",
-                "distance_m": mission.total_distance_m,
-                "waypoint_count": len(mission.waypoints),
-            },
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": coords,
+                },
+                "properties": {
+                    "name": "Flight Route",
+                    "type": "route",
+                    "distance_m": mission.total_distance_m,
+                    "waypoint_count": len(mission.waypoints),
+                },
+            }
+        )
 
     # Mission metadata
     fc: dict[str, Any] = {

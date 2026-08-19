@@ -1,11 +1,18 @@
 from __future__ import annotations
+
 import json
 from typing import Any
 
 from .base import (
-    MissionExporter, ExportResult, ValidationResult,
-    CompatibilityInfo, CompatibilityCategory, ExportWarning,
-    has_multiple_actions, has_gimbal, has_terrain_following, has_heading_per_wp,
+    CompatibilityCategory,
+    CompatibilityInfo,
+    ExportResult,
+    ExportWarning,
+    MissionExporter,
+    has_gimbal,
+    has_heading_per_wp,
+    has_multiple_actions,
+    has_terrain_following,
 )
 from .models import MissionExportData
 
@@ -45,62 +52,74 @@ def _build_plan(mission: MissionExportData) -> str:
 
     # Takeoff
     if mission.home:
-        items.append({
-            "autoContinue": True,
-            "command": 22,
-            "coordinate": [mission.home.longitude, mission.home.latitude, mission.altitude],
-            "frame": 3,
-            "params": [0, 0, 0, 0, mission.altitude, 0, 0],
-            "type": "MissionItem",
-        })
+        items.append(
+            {
+                "autoContinue": True,
+                "command": 22,
+                "coordinate": [mission.home.longitude, mission.home.latitude, mission.altitude],
+                "frame": 3,
+                "params": [0, 0, 0, 0, mission.altitude, 0, 0],
+                "type": "MissionItem",
+            }
+        )
 
     for i, wp in enumerate(mission.waypoints):
         # Insert DO_SET_CAM_TRIGG_DIST before scan line entry
         if i in trig_start_indices and mission.photo_spacing > 0:
-            items.append({
+            items.append(
+                {
+                    "autoContinue": True,
+                    "command": 206,
+                    "coordinate": [wp.longitude, wp.latitude, wp.altitude],
+                    "frame": 3,
+                    "params": [mission.photo_spacing, 0, 0, 0, 0, 0, 0],
+                    "type": "MissionItem",
+                }
+            )
+        items.append(
+            {
                 "autoContinue": True,
-                "command": 206,
+                "command": 16,
                 "coordinate": [wp.longitude, wp.latitude, wp.altitude],
                 "frame": 3,
-                "params": [mission.photo_spacing, 0, 0, 0, 0, 0, 0],
+                "params": [
+                    wp.curve_size or 0,
+                    wp.speed or mission.speed_ms,
+                    0,
+                    0,
+                    wp.heading or 0,
+                    wp.action_type if wp.action_type > 0 else -1,
+                    wp.action_param or 0,
+                ],
                 "type": "MissionItem",
-            })
-        items.append({
-            "autoContinue": True,
-            "command": 16,
-            "coordinate": [wp.longitude, wp.latitude, wp.altitude],
-            "frame": 3,
-            "params": [
-                wp.curve_size or 0,
-                wp.speed or mission.speed_ms,
-                0, 0, wp.heading or 0,
-                wp.action_type if wp.action_type > 0 else -1,
-                wp.action_param or 0,
-            ],
-            "type": "MissionItem",
-        })
+            }
+        )
         # Insert DO_SET_CAM_TRIGG_DIST=0 after scan line exit
         if i in trig_stop_indices:
-            items.append({
-                "autoContinue": True,
-                "command": 206,
-                "coordinate": [wp.longitude, wp.latitude, wp.altitude],
-                "frame": 3,
-                "params": [0, 0, 0, 0, 0, 0, 0],
-                "type": "MissionItem",
-            })
+            items.append(
+                {
+                    "autoContinue": True,
+                    "command": 206,
+                    "coordinate": [wp.longitude, wp.latitude, wp.altitude],
+                    "frame": 3,
+                    "params": [0, 0, 0, 0, 0, 0, 0],
+                    "type": "MissionItem",
+                }
+            )
 
     # Land
     if mission.waypoints:
         last = mission.waypoints[-1]
-        items.append({
-            "autoContinue": True,
-            "command": 21,
-            "coordinate": [last.longitude, last.latitude, last.altitude],
-            "frame": 3,
-            "params": [0, 0, 0, 0, 0, 0, 0],
-            "type": "MissionItem",
-        })
+        items.append(
+            {
+                "autoContinue": True,
+                "command": 21,
+                "coordinate": [last.longitude, last.latitude, last.altitude],
+                "frame": 3,
+                "params": [0, 0, 0, 0, 0, 0, 0],
+                "type": "MissionItem",
+            }
+        )
 
     plan: dict[str, Any] = {
         "fileType": "Plan",
@@ -151,27 +170,33 @@ class QgcExporter(MissionExporter):
     def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
         warnings: list[ExportWarning] = []
         if has_gimbal(mission):
-            warnings.append(ExportWarning(
-                code="gimbal_lost",
-                message="El plan QGC no representa pitch/modo de gimbal por waypoint.",
-                fields=["gimbal_pitch", "gimbal_mode"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="gimbal_lost",
+                    message="El plan QGC no representa pitch/modo de gimbal por waypoint.",
+                    fields=["gimbal_pitch", "gimbal_mode"],
+                )
+            )
         if has_multiple_actions(mission):
-            warnings.append(ExportWarning(
-                code="actions_approximated",
-                message=(
-                    "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
-                    "al inicio/fin de cada scanline; las acciones exactas por waypoint "
-                    "no se transfieren."
-                ),
-                fields=["actions", "action_type", "action_param"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="actions_approximated",
+                    message=(
+                        "El disparo de cámara se aproxima con DO_SET_CAM_TRIGG_DIST "
+                        "al inicio/fin de cada scanline; las acciones exactas por waypoint "
+                        "no se transfieren."
+                    ),
+                    fields=["actions", "action_type", "action_param"],
+                )
+            )
         if has_terrain_following(mission):
-            warnings.append(ExportWarning(
-                code="terrain_following_lost",
-                message="El plan no activa seguimiento de terreno; se exportan alturas fijas.",
-                fields=["terrain_following"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="terrain_following_lost",
+                    message="El plan no activa seguimiento de terreno; se exportan alturas fijas.",
+                    fields=["terrain_following"],
+                )
+            )
         if not has_heading_per_wp(mission):
             pass
         return warnings

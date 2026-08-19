@@ -1,6 +1,7 @@
 import { Source, Layer, Marker } from 'react-map-gl/maplibre';
 import type { LayerProps } from 'react-map-gl/maplibre';
 import { useMissionStore } from '@/modules/missions/planningStore';
+import { useTurnRadiusStore } from '@/modules/planning/turnRadiusStore';
 import { useMemo } from 'react';
 
 const scanLineLayer: LayerProps = {
@@ -67,6 +68,52 @@ const centerlineLayer: LayerProps = {
   },
 };
 
+const turnArcLayer: LayerProps = {
+  id: 'turn-radius-arc',
+  type: 'line',
+  filter: ['==', ['get', 'kind'], 'turn_arc'],
+  paint: {
+    'line-color': '#e040fb',
+    'line-width': 2.5,
+    'line-dasharray': [3, 2],
+    'line-opacity': 0.95,
+  },
+};
+
+const turnCenterLayer: LayerProps = {
+  id: 'turn-radius-center',
+  type: 'circle',
+  filter: ['==', ['get', 'kind'], 'turn_center'],
+  paint: {
+    'circle-radius': 4,
+    'circle-color': '#e040fb',
+    'circle-stroke-color': '#ffffff',
+    'circle-stroke-width': 1,
+  },
+};
+
+const clearanceBufferFillLayer: LayerProps = {
+  id: 'turn-radius-clearance-fill',
+  type: 'fill',
+  filter: ['==', ['get', 'kind'], 'clearance_buffer'],
+  paint: {
+    'fill-color': '#e040fb',
+    'fill-opacity': 0.06,
+  },
+};
+
+const clearanceBufferOutlineLayer: LayerProps = {
+  id: 'turn-radius-clearance-outline',
+  type: 'line',
+  filter: ['==', ['get', 'kind'], 'clearance_buffer'],
+  paint: {
+    'line-color': '#e040fb',
+    'line-width': 1,
+    'line-dasharray': [1, 1],
+    'line-opacity': 0.4,
+  },
+};
+
 function WaypointMarker({ feature }: { feature: GeoJSON.Feature }) {
   const coords = (feature.geometry as GeoJSON.Point).coordinates;
   const props = feature.properties as Record<string, any>;
@@ -126,11 +173,18 @@ export default function FlightLinesLayer() {
   const geoJSON = useMissionStore((s) => s.flightLinesGeoJSON);
   const corridorPolygon = useMissionStore((s) => s.corridorPolygon);
   const centerline = useMissionStore((s) => s.gridResult?.geometry?.centerline_geojson);
+  const turnRadiusResult = useTurnRadiusStore((s) => s.result);
 
   const data = useMemo(() => {
     if (!geoJSON) return { type: 'FeatureCollection', features: [] } as GeoJSON.FeatureCollection;
     return geoJSON;
   }, [geoJSON]);
+
+  const turnGeometry = useMemo(() => {
+    const geometry = turnRadiusResult?.geometry;
+    if (!geometry || !geometry.features?.length) return null;
+    return geometry;
+  }, [turnRadiusResult]);
 
   const waypointFeatures = useMemo(() => {
     if (!geoJSON) return [];
@@ -150,6 +204,14 @@ export default function FlightLinesLayer() {
       {centerline && (
         <Source id="corridor-centerline" type="geojson" data={centerline}>
           <Layer {...centerlineLayer} />
+        </Source>
+      )}
+      {turnGeometry && (
+        <Source id="turn-radius" type="geojson" data={turnGeometry}>
+          <Layer {...clearanceBufferFillLayer} />
+          <Layer {...clearanceBufferOutlineLayer} />
+          <Layer {...turnArcLayer} />
+          <Layer {...turnCenterLayer} />
         </Source>
       )}
       <Source id="flight-lines" type="geojson" data={data}>

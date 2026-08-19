@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-type Tab = 'projects' | 'basemap' | 'missions' | 'export';
+type Tab = 'projects' | 'basemap' | 'missions' | 'export' | 'optimizer';
 
 interface SidebarState {
   activeTab: Tab;

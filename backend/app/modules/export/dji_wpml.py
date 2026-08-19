@@ -17,7 +17,7 @@ from .base import (
     has_heading_per_wp,
     has_multiple_actions,
 )
-from .models import MissionExportData
+from .models import ExportWaypoint, MissionExportData
 
 
 def _build_xml(mission: MissionExportData) -> str:
@@ -85,18 +85,31 @@ def _build_xml(mission: MissionExportData) -> str:
                 hdg_diff = 360 - hdg_diff
             is_scan_exit = hdg_diff > 45
 
-        _add_action_group(wp_elem, wp, is_interval_mode, is_scan_entry, is_scan_exit,
-                          mission.photo_spacing, mission.speed_ms,
-                          mission.capture_interval_s)
+        _add_action_group(
+            wp_elem,
+            wp,
+            is_interval_mode,
+            is_scan_entry,
+            is_scan_exit,
+            mission.photo_spacing,
+            mission.speed_ms,
+            mission.capture_interval_s,
+        )
 
     raw = ET.tostring(root, encoding="unicode")
     return minidom.parseString(raw).toprettyxml(indent="  ")
 
 
-def _add_action_group(parent: ET.Element, wp: ExportWaypoint,
-                      is_interval_mode: bool, is_scan_entry: bool, is_scan_exit: bool,
-                      photo_spacing: float, speed_ms: float,
-                      capture_interval_s: Optional[int] = None) -> None:
+def _add_action_group(
+    parent: ET.Element,
+    wp: ExportWaypoint,
+    is_interval_mode: bool,
+    is_scan_entry: bool,
+    is_scan_exit: bool,
+    photo_spacing: float,
+    speed_ms: float,
+    capture_interval_s: Optional[int] = None,
+) -> None:
     ag = ET.SubElement(parent, "actionGroup")
     ag_id = ET.SubElement(ag, "actionGroupIndex")
     ag_id.text = "1"
@@ -149,52 +162,59 @@ class DjiWpmlExporter(MissionExporter):
     def validate(self, mission: MissionExportData) -> ValidationResult:
         errors: list[ValidationError] = []
         if len(mission.waypoints) > 240:
-            errors.append(ValidationError(
-                field="waypoints",
-                message=f"DJI Pilot 2 soporta máximo 240 waypoints (se tienen {len(mission.waypoints)})"
-            ))
+            errors.append(
+                ValidationError(
+                    field="waypoints",
+                    message=f"DJI Pilot 2 soporta máximo 240 waypoints (se tienen {len(mission.waypoints)})",
+                )
+            )
         if not mission.home or (mission.home.latitude == 0 and mission.home.longitude == 0):
-            errors.append(ValidationError(
-                field="home",
-                message="Se requiere un Home Point válido para DJI WPML"
-            ))
+            errors.append(ValidationError(field="home", message="Se requiere un Home Point válido para DJI WPML"))
         return ValidationResult(valid=len(errors) == 0, errors=errors)
 
     def get_warnings(self, mission: MissionExportData) -> list[ExportWarning]:
         warnings: list[ExportWarning] = []
         if has_elevation_data(mission):
-            warnings.append(ExportWarning(
-                code="elevation_lost",
-                message=(
-                    "WPML no representa la elevación del terreno (MSL/AGL); "
-                    "las alturas se exportan como valores del modelo."
-                ),
-                fields=["elevation_msnm", "agl"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="elevation_lost",
+                    message=(
+                        "WPML no representa la elevación del terreno (MSL/AGL); "
+                        "las alturas se exportan como valores del modelo."
+                    ),
+                    fields=["elevation_msnm", "agl"],
+                )
+            )
         if has_heading_per_wp(mission):
-            warnings.append(ExportWarning(
-                code="heading_ignored",
-                message=(
-                    "El archivo usa headingMode=auto; el rumbo definido por waypoint "
-                    "no controla la orientación del dron."
-                ),
-                fields=["heading"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="heading_ignored",
+                    message=(
+                        "El archivo usa headingMode=auto; el rumbo definido por waypoint "
+                        "no controla la orientación del dron."
+                    ),
+                    fields=["heading"],
+                )
+            )
         if has_multiple_actions(mission):
-            warnings.append(ExportWarning(
-                code="actions_approximated",
-                message=(
-                    "Las acciones múltiples por waypoint se simplifican; WPML usa "
-                    "disparo por intervalo estimado (reachPoint) en modo de línea."
-                ),
-                fields=["actions"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="actions_approximated",
+                    message=(
+                        "Las acciones múltiples por waypoint se simplifican; WPML usa "
+                        "disparo por intervalo estimado (reachPoint) en modo de línea."
+                    ),
+                    fields=["actions"],
+                )
+            )
         if has_gimbal(mission):
-            warnings.append(ExportWarning(
-                code="gimbal_approximated",
-                message="El pitch/modo del gimbal no se transfiere de forma fiel en este exportador.",
-                fields=["gimbal_pitch", "gimbal_mode"],
-            ))
+            warnings.append(
+                ExportWarning(
+                    code="gimbal_approximated",
+                    message="El pitch/modo del gimbal no se transfiere de forma fiel en este exportador.",
+                    fields=["gimbal_pitch", "gimbal_mode"],
+                )
+            )
         return warnings
 
     def export(self, mission: MissionExportData) -> ExportResult:

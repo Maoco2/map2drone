@@ -20,6 +20,7 @@ from shapely.geometry import LineString, MultiLineString
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+
 def _pts_from_coords(coords) -> list[list[float]]:
     pts: list[list[float]] = []
     for c in coords:
@@ -45,6 +46,7 @@ def _line_coords(geom) -> Optional[list[list[float]]]:
 # ---------------------------------------------------------------------------
 # GeoJSON
 # ---------------------------------------------------------------------------
+
 
 def _collect_line_coords(geom, out: list[list[list[float]]]) -> None:
     if not isinstance(geom, dict):
@@ -100,6 +102,7 @@ def parse_geojson(data: bytes) -> list[list[list[float]]]:
 # ---------------------------------------------------------------------------
 # KML / KMZ
 # ---------------------------------------------------------------------------
+
 
 def _local_tag(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
@@ -157,7 +160,7 @@ def parse_kmz(data: bytes) -> list[list[list[float]]]:
 # ---------------------------------------------------------------------------
 
 _POLYLINE_TYPES = (3, 13, 23)  # PolyLine, PolyLineZ, PolyLineM
-_POLYGON_TYPES = (5, 15, 25)   # Polygon, PolygonZ, PolygonM
+_POLYGON_TYPES = (5, 15, 25)  # Polygon, PolygonZ, PolygonM
 
 
 def parse_shapefile(data: bytes) -> list[list[list[float]]]:
@@ -174,7 +177,7 @@ def parse_shapefile(data: bytes) -> list[list[list[float]]]:
             # exterior rings usable as a closed centerline
             parts = shp.parts + [len(shp.points)]
             for i in range(len(shp.parts)):
-                pts = _pts_from_coords(shp.points[parts[i]:parts[i + 1]])
+                pts = _pts_from_coords(shp.points[parts[i] : parts[i + 1]])
                 if len(pts) >= 4:
                     pts.append(pts[0])
                     out.append(pts)
@@ -185,13 +188,14 @@ def parse_shapefile(data: bytes) -> list[list[list[float]]]:
 # GeoPackage (sqlite + GPB header -> WKB)
 # ---------------------------------------------------------------------------
 
+
 def _gpkg_blob_to_wkb(blob: bytes) -> Optional[bytes]:
     if len(blob) < 8:
         return None
     flags = blob[1]
     env_type = (flags >> 1) & 0x07
     env_size = {0: 0, 1: 32, 2: 48, 3: 64, 4: 64}.get(env_type, 0)
-    return blob[6 + env_size:]
+    return blob[6 + env_size :]
 
 
 def parse_geopackage(data: bytes) -> list[list[list[float]]]:
@@ -231,6 +235,7 @@ def parse_geopackage(data: bytes) -> list[list[list[float]]]:
 # ---------------------------------------------------------------------------
 # Format detection
 # ---------------------------------------------------------------------------
+
 
 def detect_format(filename: str, data: bytes) -> str:
     name = (filename or "").lower()

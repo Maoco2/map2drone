@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Optional
+from enum import Enum
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RegisterRequest(BaseModel):
@@ -118,6 +119,7 @@ class CaptureIntervalBlock(BaseModel):
     plausible AGL and is an ESTIMATE (it can be below the planned altitude);
     it is never the nominal flight altitude by itself.
     """
+
     status: str = "ERROR"
     required_photo_spacing_m: Optional[float] = None
     ideal_interval_s: Optional[float] = None
@@ -147,6 +149,7 @@ class GridRequest(BaseModel):
     grid_type: str = "simple"
     altitude_mode: str = "takeoff"
     dem_resolution_m: Optional[float] = None
+    turn_radius: Optional[dict] = None
 
 
 class GridResponse(BaseModel):
@@ -167,6 +170,32 @@ class GridResponse(BaseModel):
     waypoint_mode: str = "photo"
     warnings: list[str] = []
     capture_interval: Optional[CaptureIntervalBlock] = None
+    turn_radius_result: Optional[dict] = None
+    turn_radius_warnings: list[str] = []
+    flight_lines_geojson: Optional[dict] = None
+    photo_points: list[dict] = []
+
+
+class TurnRadiusRequest(BaseModel):
+    """Live recompute of the turn-radius plan for an existing flight plan.
+
+    ``waypoints`` are the mission waypoints as returned by the grid/corridor
+    planner (heading groups reconstruct the flight lines). ``mission_type``
+    selects the planner; for LINEAR_CORRIDOR the real ``flight_lines_geojson``
+    is used when provided so turn angles follow the corridor bends.
+    """
+
+    mission_type: str = "AREA_GRID"
+    waypoints: list[WaypointSchema] = []
+    line_spacing: float = 0
+    recommended_speed_ms: float = 6.8
+    turn_radius: dict = {}
+    flight_lines_geojson: Optional[dict] = None
+
+
+class TurnRadiusResponse(BaseModel):
+    turn_radius_result: Optional[dict] = None
+    turn_radius_warnings: list[str] = []
 
 
 class CorridorRequest(BaseModel):
@@ -183,6 +212,7 @@ class CorridorRequest(BaseModel):
     home_longitude: Optional[float] = None
     altitude_mode: str = "takeoff"
     dem_resolution_m: Optional[float] = None
+    turn_radius: Optional[dict] = None
 
 
 class CorridorGeometry(BaseModel):
@@ -214,6 +244,9 @@ class CorridorResponse(BaseModel):
     geometry: CorridorGeometry = CorridorGeometry()
     warnings: list[str] = []
     capture_interval: Optional[CaptureIntervalBlock] = None
+    turn_radius_result: Optional[dict] = None
+    turn_radius_warnings: list[str] = []
+    photo_points: list[dict] = []
 
 
 class CorridorImportResponse(CorridorResponse):
@@ -322,6 +355,102 @@ class ExportRequest(BaseModel):
     overlap_lateral: float = 65
     battery_count: int = 0
     capture_interval_s: Optional[int] = None
+    options: dict = {}
+
+
+class MissionValidateRequest(BaseModel):
+    payload: dict | str
+
+
+class MissionValidateResponse(BaseModel):
+    valid: bool
+    status: str = "VALID"
+    errors: list[dict] = []
+    warnings: list[dict] = []
+
+
+class OptimizerEvaluateRequest(BaseModel):
+    mission: dict
+    drone_profile: Optional[dict] = None
+    camera_profile: Optional[dict] = None
+    constraints: Optional[dict] = None
+    weights: Optional[dict] = None
+
+
+class OptimizerEvaluateResponse(BaseModel):
+    valid: bool
+    status: str = "VALID"
+    metrics: dict = {}
+    score: Optional[dict] = None
+    warnings: list[str] = []
+    validation: Optional[dict] = None
+
+
+# ── Optimizer solve (Fase 10C-10) ────────────────────────────────────────────
+
+
+class OptimizerVariableDeclaration(BaseModel):
+    """Single optimizable variable declaration (mirrors the optimizer contract).
+
+    ``mode`` is ``fixed`` / ``range`` / ``candidate_values``; only the fields
+    relevant to the mode are used.
+    """
+
+    name: str
+    mode: str = "fixed"
+    value: Optional[Any] = None
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    step: Optional[float] = None
+    values: list[Any] = Field(default_factory=list)
+
+
+class OptimizerVariablesRequest(BaseModel):
+    variables: list[OptimizerVariableDeclaration] = Field(default_factory=list)
+
+
+class OptimizerSolveRequest(BaseModel):
+    """POST /optimizer/solve payload.
+
+    Exactly one of ``grid`` / ``corridor`` must be provided (the base planning
+    request the search starts from). ``variables`` declares what to optimize;
+    when omitted the base mission itself is evaluated as a single candidate.
+    """
+
+    grid: Optional[GridRequest] = None
+    corridor: Optional[CorridorRequest] = None
+    variables: Optional[OptimizerVariablesRequest] = None
+    constraints: Optional[dict] = None
+    weights: Optional[dict] = None
+    max_candidates: int = 1000
+
+    @model_validator(mode="after")
+    def _validate(self) -> "OptimizerSolveRequest":
+        if (self.grid is None) == (self.corridor is None):
+            raise ValueError("Provide exactly one of 'grid' or 'corridor'")
+        if self.max_candidates < 1:
+            raise ValueError("max_candidates must be >= 1")
+        return self
+
+
+class OptimizerCandidateResponse(BaseModel):
+    """One selected candidate: its variable values, rebuilt mission and score."""
+
+    label: str
+    variable_values: dict = Field(default_factory=dict)
+    mission: dict = Field(default_factory=dict)
+    score: Optional[dict] = None
+
+
+class OptimizerSolveResponse(BaseModel):
+    status: str
+    message: str = ""
+    best_candidate: Optional[OptimizerCandidateResponse] = None
+    best_score: Optional[dict] = None
+    alternatives: list[OptimizerCandidateResponse] = Field(default_factory=list)
+    stats: dict = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    explanation: Optional[dict] = None
 
 
 class MultiExportRequest(BaseModel):
@@ -347,3 +476,106 @@ class MultiExportRequest(BaseModel):
     overlap_lateral: float = 65
     battery_count: int = 0
     capture_interval_s: Optional[int] = None
+    options: dict = {}
+
+
+class ExportUmmRequest(BaseModel):
+    """Export a Universal Mission directly (no legacy rebuild — Fase 10F).
+
+    ``mission`` is a serialized :class:`UniversalMission` (the winner payload
+    from the optimizer). ``options`` optionally overrides exporter options
+    (e.g. LCHM ``path_mode``); every value is otherwise read from the mission.
+    """
+
+    mission: dict
+    options: dict = Field(default_factory=dict)
+
+
+# ── Export readiness (Fase 10F) ──────────────────────────────────────────────
+
+
+class ExportReadinessStatus(str, Enum):
+    READY = "READY"
+    WARNING = "WARNING"
+    BLOCKED = "BLOCKED"
+
+
+class ExportReadinessItem(BaseModel):
+    """Export readiness diagnostic for a single exporter (Fase 10F-8).
+
+    ``status`` is ``READY`` (the exporter can serialize the mission), ``WARNING``
+    (serializable with caveats) or ``BLOCKED`` (the exporter refuses — e.g.
+    LCHM over its 99-waypoint capacity). ``codes`` carry structured reasons
+    (``split_required``, ``turn_radius_invalid``, ``turn_radius_warning``, ...).
+    """
+
+    id: str
+    name: str
+    extension: str
+    status: ExportReadinessStatus
+    reasons: list[str] = Field(default_factory=list)
+    codes: list[str] = Field(default_factory=list)
+    compatibility: Optional[dict] = None
+    warnings: list[dict] = Field(default_factory=list)
+
+
+class ExportCheckUmmRequest(BaseModel):
+    mission: dict
+    formats: list[str] = Field(default_factory=lambda: ["litchi"])
+
+
+class ExportCheckUmmResponse(BaseModel):
+    items: list[ExportReadinessItem] = Field(default_factory=list)
+
+
+# ── Optimizer apply (Fase 10F-1/2) ───────────────────────────────────────────
+
+
+class OptimizerApplyRequest(BaseModel):
+    """Apply the winner of an optimizer search to the Universal Mission.
+
+    ``solve_request`` is the original ``/optimizer/solve`` payload (the backend
+    re-derives the baseline and reproduces the winner deterministically from
+    it); ``winner`` is ``best_candidate.mission`` and ``winner_variable_values``
+    is ``best_candidate.variable_values`` from the solve response.
+    """
+
+    solve_request: OptimizerSolveRequest
+    winner: dict
+    winner_variable_values: dict = Field(default_factory=dict)
+    project_id: Optional[str] = None
+    original_mission_id: Optional[str] = None
+    name: Optional[str] = None
+
+
+class MissionComparisonItem(BaseModel):
+    """One row of the Baseline vs Winner comparison table (Fase 10F-2)."""
+
+    metric: str
+    label: str
+    baseline: Optional[float] = None
+    winner: Optional[float] = None
+    delta: Optional[float] = None
+    unit: str = ""
+
+
+class OptimizerApplyResponse(BaseModel):
+    """Backend result of applying the winner (Fase 10F-1).
+
+    ``baseline_mission`` / ``winner_mission`` are the serialized Universal
+    Missions (winner == the mission the search evaluated, re-derived and
+    verified). ``comparison`` is the before/after table, ``modified_variables``
+    the variables that changed, and ``verification`` reports the deterministic
+    rebuild check.
+    """
+
+    applied: bool = True
+    mission_id: Optional[str] = None
+    baseline_mission: dict = Field(default_factory=dict)
+    baseline_score: Optional[dict] = None
+    winner_mission: dict = Field(default_factory=dict)
+    winner_score: Optional[dict] = None
+    comparison: list[MissionComparisonItem] = Field(default_factory=list)
+    modified_variables: list[str] = Field(default_factory=list)
+    verification: dict = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

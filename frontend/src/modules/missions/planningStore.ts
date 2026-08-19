@@ -33,49 +33,13 @@ interface MissionState {
   clear: () => void;
 }
 
-function headingDiff(a: number, b: number): number {
-  let d = Math.abs(a - b) % 360;
-  if (d > 180) d = 360 - d;
-  return d;
-}
-
-function interpolatePhotoPoints(
-  waypoints: Waypoint[],
-  photoSpacing: number,
-  isInterval: boolean,
-): GeoJSON.Feature[] {
-  if (!isInterval || photoSpacing <= 0) return [];
-  const points: GeoJSON.Feature[] = [];
-  const R = 6371000;
-  function distMeters(a: Waypoint, b: Waypoint): number {
-    const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
-    const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
-    const lat1 = (a.latitude * Math.PI) / 180;
-    const lat2 = (b.latitude * Math.PI) / 180;
-    const sinDLat = Math.sin(dLat / 2);
-    const sinDLng = Math.sin(dLng / 2);
-    const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
-    return 2 * R * Math.asin(Math.sqrt(h));
-  }
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    const a = waypoints[i];
-    const b = waypoints[i + 1];
-    if (headingDiff(a.heading, b.heading) > 45) continue;
-    const segLen = distMeters(a, b);
-    const steps = Math.floor(segLen / photoSpacing);
-    for (let s = 1; s <= steps; s++) {
-      const frac = (s * photoSpacing) / segLen;
-      const lat = a.latitude + (b.latitude - a.latitude) * frac;
-      const lng = a.longitude + (b.longitude - a.longitude) * frac;
-      points.push({
-        type: 'Feature',
-        id: `pt_${i}_${s}`,
-        geometry: { type: 'Point', coordinates: [lng, lat] },
-        properties: { type: 'photo_trigger' },
-      });
-    }
-  }
-  return points;
+function waypointsToFeatures(waypoints: Waypoint[]): GeoJSON.Feature[] {
+  return waypoints.map((wp, i) => ({
+    type: 'Feature',
+    id: `wp_${i}`,
+    geometry: { type: 'Point', coordinates: [wp.longitude, wp.latitude] },
+    properties: { index: i + 1, altitude: wp.altitude, heading: wp.heading, type: 'waypoint' },
+  }));
 }
 
 export const useMissionStore = create<MissionState>((set) => ({
@@ -106,12 +70,13 @@ export const useMissionStore = create<MissionState>((set) => ({
       set({ gridResult: null, flightLinesGeoJSON: null, corridorPolygon: null, corridorWarnings: [] });
       return;
     }
+    // Backend is the single source of truth for flight lines and photo points;
+    // the frontend only visualizes them (it no longer reconstructs geometry).
     const lines: GeoJSON.Feature[] = [];
-    const waypoints = result.waypoints;
-    const isInterval = result.waypoint_mode === 'vertex' || result.waypoint_mode === 'terrain';
-
-    if (result.geometry?.flight_lines_geojson?.features?.length) {
-      result.geometry.flight_lines_geojson.features.forEach((f, i) => {
+    const flightLines =
+      result.flight_lines_geojson ?? result.geometry?.flight_lines_geojson;
+    if (flightLines?.features?.length) {
+      flightLines.features.forEach((f, i) => {
         lines.push({
           type: 'Feature',
           id: `fl_${i}`,
@@ -119,36 +84,18 @@ export const useMissionStore = create<MissionState>((set) => ({
           properties: { type: 'scan' },
         });
       });
-    } else {
-      for (let i = 0; i < waypoints.length - 1; i++) {
-        const wp1 = waypoints[i];
-        const wp2 = waypoints[i + 1];
-        const coords: [number, number][] = [
-          [wp1.longitude, wp1.latitude],
-          [wp2.longitude, wp2.latitude],
-        ];
-        const diff = headingDiff(wp1.heading, wp2.heading);
-        if (diff > 1 && diff < 179) {
-          continue;
-        }
-        const isGiro = diff > 90;
-        lines.push({
-          type: 'Feature',
-          id: `fl_${i}`,
-          geometry: { type: 'LineString', coordinates: coords },
-          properties: { type: isGiro ? 'giro' : 'scan' },
-        });
-      }
     }
 
-    const points: GeoJSON.Feature[] = waypoints.map((wp, i) => ({
-      type: 'Feature',
-      id: `wp_${i}`,
-      geometry: { type: 'Point', coordinates: [wp.longitude, wp.latitude] },
-      properties: { index: i + 1, altitude: wp.altitude, heading: wp.heading, type: 'waypoint' },
-    }));
+    const points: GeoJSON.Feature[] = waypointsToFeatures(result.waypoints);
 
-    const photoTriggers = interpolatePhotoPoints(waypoints, result.photo_spacing, isInterval);
+    const photoTriggers: GeoJSON.Feature[] = (result.photo_points ?? [])
+      .filter((p) => p.capture)
+      .map((p) => ({
+        type: 'Feature',
+        id: `pt_${p.index}`,
+        geometry: { type: 'Point', coordinates: [p.longitude, p.latitude] },
+        properties: { type: 'photo_trigger' },
+      }));
 
     const fc: GeoJSON.FeatureCollection = {
       type: 'FeatureCollection',

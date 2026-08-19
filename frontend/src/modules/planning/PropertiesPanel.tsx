@@ -10,7 +10,10 @@ import { useProjectStore } from '@/modules/projects/store';
 import { useMissionListStore } from '@/modules/missions/missionListStore';
 import type { Drone, Camera } from '@/shared/types/project';
 import { computeLiveCapture } from '@/shared/utils/captureInterval';
+import { buildTurnRadiusConfig, missionTypeLabel } from '@/shared/utils/turnRadius';
+import { useTurnRadiusStore } from './turnRadiusStore';
 import CaptureIntervalCard from './CaptureIntervalCard';
+import TurnRadiusPanel from './TurnRadiusPanel';
 import AdSlot from '@/shared/components/AdSlot';
 
 function getPolygonPoints(f: DrawFeature): { lng: number; lat: number }[] {
@@ -79,6 +82,7 @@ export default function PropertiesPanel() {
   } = useMissionStore();
   const selectedProjectId = useProjectStore((s) => s.selectedProjectId);
   const fetchMissions = useMissionListStore((s) => s.fetchMissions);
+  const turnRadiusResult = useTurnRadiusStore((s) => s.result);
 
   const [selectedMfr, setSelectedMfr] = useState('');
   const [gridType, setGridType] = useState<'simple' | 'cross'>('simple');
@@ -160,6 +164,21 @@ export default function PropertiesPanel() {
     setGenerating(true);
     setError(null);
     try {
+      const trState = useTurnRadiusStore.getState();
+      const turnRadiusConfig = buildTurnRadiusConfig(
+        {
+          mode: trState.mode,
+          manualRadius: trState.manualRadius,
+          speedOverride: trState.speedOverride,
+          safetyFactor: trState.safetyFactor,
+          clearance: trState.clearance,
+          maxLatAccel: trState.maxLatAccel,
+          minRadius: trState.minRadius,
+          maxRadius: trState.maxRadius,
+        },
+        0,
+        { mission_type: missionTypeLabel(missionVariant), line_spacing: 0 },
+      );
       if (missionVariant === 'corridor') {
         let lineFeature = features
           .filter((f) => f.type === 'polyline' && f.completed && f.points.length >= 2)
@@ -192,6 +211,7 @@ export default function PropertiesPanel() {
           drone_id: droneId,
           project_id: selectedProjectId || undefined,
           altitude_mode: altitudeMode,
+          ...(turnRadiusConfig ? { turn_radius: turnRadiusConfig } : {}),
         });
         setGridResult(result);
         setCaptureSnapshot({
@@ -222,6 +242,7 @@ export default function PropertiesPanel() {
         project_id: selectedProjectId || undefined,
         grid_type: gridType,
         altitude_mode: altitudeMode,
+        ...(turnRadiusConfig ? { turn_radius: turnRadiusConfig } : {}),
       };
       const result = await api.planning.grid(baseReq);
       setGridResult(result);
@@ -570,6 +591,12 @@ export default function PropertiesPanel() {
               <div className="flex justify-between"><span>Time:</span><span className="font-mono">{Math.round(gridResult.estimated_time_sec / 60)} min</span></div>
               <div className="flex justify-between"><span>Batteries:</span><span className="font-mono">{gridResult.battery_count}</span></div>
               <div className="flex justify-between"><span>Waypoints:</span><span className="font-mono">{gridResult.waypoints.length}</span></div>
+              {turnRadiusResult && turnRadiusResult.status !== 'NONE' && (
+                <div className="flex justify-between">
+                  <span>RADIO DE GIRO:</span>
+                  <span className="font-mono">{turnRadiusResult.radius_m.toFixed(1)} m</span>
+                </div>
+              )}
               {gridResult.geometry && (
                 <div className="text-[10px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>
                   CRS: {gridResult.geometry.crs_name} (EPSG:{gridResult.geometry.epsg_out})
@@ -594,6 +621,8 @@ export default function PropertiesPanel() {
                 lateralOverlap={Number(overlapLateral)}
               />
             )}
+
+            <TurnRadiusPanel />
 
             <button
               onClick={handleOpenExport}

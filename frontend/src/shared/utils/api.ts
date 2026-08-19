@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { Project, Mission, Drone, Camera, GridResult, CorridorParseResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem } from '@/shared/types/project';
+import type { Project, Mission, Drone, Camera, GridResult, CorridorParseResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem, TurnRadiusResponse, TurnRadiusRecomputeRequest, OptimizerSolveRequest, OptimizerSolveResponse, OptimizerApplyRequest, OptimizerApplyResponse, ExportCheckUmmResponse } from '@/shared/types/project';
 
-const API_BASE = '/api/v1';
+const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api/v1';
 
 function getToken(): string | null {
   try { return localStorage.getItem('token'); } catch { return null; }
@@ -176,6 +176,24 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    turnRadius: (data: TurnRadiusRecomputeRequest) =>
+      fetchJson<TurnRadiusResponse>('/planning/turn-radius', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
+  optimizer: {
+    solve: (data: OptimizerSolveRequest) =>
+      fetchJson<OptimizerSolveResponse>('/optimizer/solve', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    apply: (data: OptimizerApplyRequest) =>
+      fetchJson<OptimizerApplyResponse>('/optimizer/apply', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   export: {
     listFormats: () =>
@@ -195,6 +213,18 @@ export const api = {
 
     multi: (data: any) =>
       fetchBlob('/export/multi', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    umm: (fmt: string, data: { mission: object; options?: Record<string, unknown> }) =>
+      fetchBlob(`/export/umm/${fmt}`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+
+    checkUmm: (data: { mission: object; formats: string[] }) =>
+      fetchJson<ExportCheckUmmResponse>('/export/check-umm', {
         method: 'POST',
         body: JSON.stringify(data),
       }),

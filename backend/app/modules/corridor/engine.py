@@ -23,14 +23,17 @@ from app.core.photogrammetry.capture_interval import (
     compute_capture_interval,
     compute_minimum_plausible_agl,
 )
-from app.models.schemas import Camera, Drone
+from app.models.schemas import Drone
+from app.modules.planning.core.camera import get_camera_required
+from app.modules.planning.core.distance import utm_epsg_for
+from app.modules.planning.core.metrics import calculate_mission_metrics
+from app.modules.planning.core.photo_points import annotate_photo_points, photo_points_to_dicts
+from app.modules.planning.core.photogrammetry import calc_footprint, calc_gsd
+from app.modules.planning.core.spacing import calculate_line_spacing, calculate_photo_spacing
+from app.modules.planning.core.speed import calculate_recommended_speed
 from app.modules.planning.elevation import ElevationProvider, create_provider
-from app.modules.planning.engine import calc_footprint, calc_gsd
+from app.modules.planning.turn_radius.integration import compute_turn_radius_plan
 from app.schemas.schemas import CorridorGeometry, CorridorRequest, CorridorResponse, WaypointSchema
-
-
-def _get_camera(db_session, camera_id: str) -> Camera | None:
-    return db_session.query(Camera).filter(Camera.id == camera_id).first()
 
 
 def _extract_centerline_coords(centerline: dict) -> list[list[float]]:
@@ -51,12 +54,6 @@ def _extract_centerline_coords(centerline: dict) -> list[list[float]]:
     if len(cleaned) < 2:
         raise ValueError("Centerline must have at least 2 valid coordinate pairs")
     return cleaned
-
-
-def _utm_epsg_for(lon: float, lat: float) -> int:
-    zone = int((lon + 180.0) // 6) + 1
-    zone = max(1, min(60, zone))
-    return 32600 + zone if lat >= 0 else 32700 + zone
 
 
 def _as_single_line(geom) -> Optional[LineString]:
@@ -150,6 +147,7 @@ def _build_flight_segments(
 # ---------------------------------------------------------------------------
 # Waypoint generation strategies
 # ---------------------------------------------------------------------------
+
 
 def _photo_waypoints(
     segments: list[LineString],
@@ -280,13 +278,17 @@ def _terrain_waypoints(
             if not forced and k != 0 and k != count - 1 and abs(elev - last_break_elev) <= elevation_threshold:
                 base += 1
                 continue
-            wps.append(WaypointSchema(
-                latitude=lat, longitude=lng,
-                altitude=adj_alt, heading=hdg,
-                action_type=-1,
-                elevation_msnm=elev,
-                agl=altitude,
-            ))
+            wps.append(
+                WaypointSchema(
+                    latitude=lat,
+                    longitude=lng,
+                    altitude=adj_alt,
+                    heading=hdg,
+                    action_type=-1,
+                    elevation_msnm=elev,
+                    agl=altitude,
+                )
+            )
             base += 1
             if k != count - 1:
                 last_break_elev = elev
@@ -298,6 +300,7 @@ def _terrain_waypoints(
 # GeoJSON output helpers
 # ---------------------------------------------------------------------------
 
+
 def _polygon_to_geojson(poly: Polygon, inverse: Transformer) -> dict:
     ring = [list(inverse.transform(x, y)) for x, y in poly.exterior.coords]
     return {"type": "Polygon", "coordinates": [ring]}
@@ -307,12 +310,14 @@ def _flight_lines_to_geojson(segments: list[LineString], inverse: Transformer) -
     features = []
     for i, seg in enumerate(segments):
         coords = [list(inverse.transform(x, y)) for x, y in seg.coords]
-        features.append({
-            "type": "Feature",
-            "id": f"cl_{i}",
-            "geometry": {"type": "LineString", "coordinates": coords},
-            "properties": {"type": "scan", "line": i},
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "id": f"cl_{i}",
+                "geometry": {"type": "LineString", "coordinates": coords},
+                "properties": {"type": "scan", "line": i},
+            }
+        )
     return {"type": "FeatureCollection", "features": features}
 
 
@@ -320,23 +325,23 @@ def _flight_lines_to_geojson(segments: list[LineString], inverse: Transformer) -
 # Main corridor entry point
 # ---------------------------------------------------------------------------
 
+
 def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
-    camera = _get_camera(db_session, req.camera_id)
-    if not camera:
-        raise ValueError("Camera not found")
+    camera = get_camera_required(db_session, req.camera_id)
 
     drone = None
     recommended_speed_ms = 10.0
     if req.drone_id:
         drone = db_session.query(Drone).filter(Drone.id == req.drone_id).first()
 
-    # Shutter-limited speed (same rule as the area grid)
-    gsd_m = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um) / 100
-    shutter_factor = 1.0 if camera.shutter_type == "mechanical" else 0.5
-    v_shutter = gsd_m / (2.0 * camera.shutter_speed_s) * shutter_factor
-    recommended_speed_ms = v_shutter
-    if drone and drone.max_speed_ms:
-        recommended_speed_ms = min(v_shutter, drone.max_speed_ms)
+    # Shutter-limited speed (Planning Core, same rule as the area grid)
+    gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
+    recommended_speed_ms = calculate_recommended_speed(
+        gsd,
+        camera.shutter_speed_s,
+        camera.shutter_type,
+        drone_max_speed_ms=drone.max_speed_ms if drone else None,
+    )
 
     coords_geo = _extract_centerline_coords(req.centerline)
     lats = [p[1] for p in coords_geo]
@@ -344,7 +349,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     center_lat = (min(lats) + max(lats)) / 2
     center_lon = (min(lons) + max(lons)) / 2
 
-    epsg = _utm_epsg_for(center_lon, center_lat)
+    epsg = utm_epsg_for(center_lon, center_lat)
     crs_name = CRS.from_epsg(epsg).name
     transformer = Transformer.from_crs(CRS.from_epsg(4326), CRS.from_epsg(epsg), always_xy=True)
     inverse = Transformer.from_crs(CRS.from_epsg(epsg), CRS.from_epsg(4326), always_xy=True)
@@ -374,10 +379,8 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     gsd = calc_gsd(req.altitude, camera.focal_length_mm, camera.pixel_size_um)
     fw, fh = calc_footprint(gsd, camera.image_width_px, camera.image_height_px)
 
-    overlap_lat = req.overlap_lateral / 100
-    overlap_frt = req.overlap_frontal / 100
-    line_spacing_m = fw * (1 - overlap_lat)
-    photo_spacing_m = fh * (1 - overlap_frt)
+    line_spacing_m = calculate_line_spacing(fw, req.overlap_lateral)
+    photo_spacing_m = calculate_photo_spacing(fh, req.overlap_frontal)
 
     segments = _build_flight_segments(center, poly, req.width_left, req.width_right, line_spacing_m)
     num_lines = len(segments)
@@ -403,8 +406,13 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
     else:  # terrain
         waypoints, _, terrain_elevations = _terrain_waypoints(
-            segments, req.altitude, inverse, elevation_provider,
-            dem_sample_interval, dem_elevation_threshold, warnings,
+            segments,
+            req.altitude,
+            inverse,
+            elevation_provider,
+            dem_sample_interval,
+            dem_elevation_threshold,
+            warnings,
         )
         photo_count = sum(max(1, int(s.length / photo_spacing_m)) for s in segments)
 
@@ -417,18 +425,35 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     if len(waypoints) < 2:
         raise ValueError("Corridor too short for the selected parameters")
 
-    total_distance = 0.0
-    for k in range(1, len(waypoints)):
-        dx = (
-            (waypoints[k].longitude - waypoints[k - 1].longitude)
-            * 111320 * math.cos(math.radians(waypoints[k].latitude))
+    # Metrics (Planning Core: UTM distance, real turn times when a turn-radius
+    # plan is configured, otherwise the documented per-line overhead fallback,
+    # unified battery requirements)
+    turn_plan = None
+    turn_radius_warnings: list[str] = []
+    if getattr(req, "turn_radius", None):
+        turn_plan, turn_radius_warnings = compute_turn_radius_plan(
+            waypoints,
+            req.turn_radius,
+            mission_type="LINEAR_CORRIDOR",
+            line_spacing=line_spacing_m,
+            recommended_speed=recommended_speed_ms,
+            flight_lines_geojson=_flight_lines_to_geojson(segments, inverse),
         )
-        dy = (waypoints[k].latitude - waypoints[k - 1].latitude) * 111320
-        total_distance += math.sqrt(dx * dx + dy * dy)
 
-    estimated_time_sec = total_distance / recommended_speed_ms + num_lines * 5
-    battery_minutes = float(drone.flight_time_min * 0.8) if drone and drone.flight_time_min else 25.0
-    battery_count = max(1, math.ceil(estimated_time_sec / 60 / battery_minutes))
+    wps_geo_heading = [(w.longitude, w.latitude, w.heading) for w in waypoints]
+    metrics = calculate_mission_metrics(
+        wps_geo_heading,
+        speed_mps=recommended_speed_ms,
+        num_lines=num_lines,
+        turn_plan=turn_plan,
+        drone_flight_time_min=drone.flight_time_min if drone else None,
+    )
+    total_distance = metrics.total_distance_m
+    estimated_time_sec = metrics.total_time_s
+    battery_count = metrics.battery_count
+
+    # Authoritative photo points (EPSG:4326)
+    photo_points = photo_points_to_dicts(annotate_photo_points(waypoints, recommended_speed_ms))
 
     # Universal capture interval recommendation (front overlap -> photo interval)
     # Terrain-follow uses a conservative minimum footprint computed from the
@@ -481,4 +506,7 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
             assumed_agl_m=ci_agl,
             assumed_footprint_length_m=fh_ci,
         ),
+        turn_radius_result=turn_plan.model_dump(mode="json") if turn_plan is not None else None,
+        turn_radius_warnings=turn_radius_warnings,
+        photo_points=photo_points,
     )

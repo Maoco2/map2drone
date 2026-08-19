@@ -1,8 +1,12 @@
 from fastapi.testclient import TestClient
+
 from app.main import app
 from app.modules.export import (
-    MissionExportData, ExportWaypoint, HomePoint, DroneInfo, CameraInfo,
-    get_exporter, list_exporters,
+    ExportWaypoint,
+    HomePoint,
+    MissionExportData,
+    get_exporter,
+    list_exporters,
 )
 
 client = TestClient(app)
@@ -20,8 +24,19 @@ def test_list_formats():
     fmts = resp.json()
     assert len(fmts) >= 10
     ids = [f["id"] for f in fmts]
-    for expected in ["litchi", "dji_wpml", "dji_kmz", "qgc", "mission_planner",
-                     "mavlink", "kml", "kmz", "geojson", "gpx"]:
+    for expected in [
+        "litchi",
+        "litchi_lchm",
+        "dji_wpml",
+        "dji_kmz",
+        "qgc",
+        "mission_planner",
+        "mavlink",
+        "kml",
+        "kmz",
+        "geojson",
+        "gpx",
+    ]:
         assert expected in ids
 
 
@@ -61,7 +76,7 @@ def test_export_dji_wpml():
     result = exporter.export(m)
     assert result.filename.endswith(".wpml")
     data = result.data.decode() if isinstance(result.data, bytes) else result.data
-    assert '<?xml' in data or '<kml' in data
+    assert "<?xml" in data or "<kml" in data
 
 
 def test_export_dji_kmz():
@@ -69,7 +84,9 @@ def test_export_dji_kmz():
     m = _mission(home=HomePoint(latitude=37.17, longitude=-3.61))
     result = exporter.export(m)
     assert result.filename.endswith(".kmz")
-    import zipfile, io
+    import io
+    import zipfile
+
     z = zipfile.ZipFile(io.BytesIO(result.data))
     names = z.namelist()
     assert "mission.wpml" in names
@@ -83,6 +100,7 @@ def test_export_qgc():
     result = exporter.export(m)
     assert result.filename.endswith(".plan")
     import json
+
     data = json.loads(result.data)
     assert "mission" in data
     assert "plannedHomePosition" in data["mission"]
@@ -102,6 +120,7 @@ def test_export_mavlink():
     result = exporter.export(m)
     assert result.filename.endswith(".json")
     import json
+
     data = result.data.decode() if isinstance(result.data, bytes) else result.data
     obj = json.loads(data)
     assert "mission" in obj
@@ -121,7 +140,7 @@ def test_export_kml():
     result = exporter.export(m)
     assert result.filename.endswith(".kml")
     data = result.data.decode() if isinstance(result.data, bytes) else result.data
-    assert '<kml' in data
+    assert "<kml" in data
 
 
 def test_export_kmz():
@@ -129,7 +148,9 @@ def test_export_kmz():
     m = _mission()
     result = exporter.export(m)
     assert result.filename.endswith(".kmz")
-    import zipfile, io
+    import io
+    import zipfile
+
     z = zipfile.ZipFile(io.BytesIO(result.data))
     names = z.namelist()
     assert "doc.kml" in names
@@ -137,6 +158,7 @@ def test_export_kmz():
 
 def test_export_geojson():
     import json
+
     exporter = get_exporter("geojson")
     m = _mission()
     result = exporter.export(m)
@@ -152,49 +174,67 @@ def test_export_gpx():
     result = exporter.export(m)
     assert result.filename.endswith(".gpx")
     data = result.data.decode() if isinstance(result.data, bytes) else result.data
-    assert '<gpx' in data
+    assert "<gpx" in data
 
 
 # --- API endpoint tests ---
 
+
 def test_api_export_unified():
     for fmt in ["litchi", "dji_wpml", "qgc", "mission_planner", "kml", "geojson", "gpx"]:
-        resp = client.post(f"/api/v1/export/{fmt}", json={
-            "project_name": "Test",
-            "waypoints": SAMPLE_WPS,
-            "speed": 10, "altitude": 100,
-            "home_latitude": 37.17, "home_longitude": -3.61,
-        })
+        resp = client.post(
+            f"/api/v1/export/{fmt}",
+            json={
+                "project_name": "Test",
+                "waypoints": SAMPLE_WPS,
+                "speed": 10,
+                "altitude": 100,
+                "home_latitude": 37.17,
+                "home_longitude": -3.61,
+            },
+        )
         assert resp.status_code == 200, f"{fmt} failed: {resp.text[:200]}"
 
 
 def test_api_multi_export():
-    resp = client.post("/api/v1/export/multi", json={
-        "formats": ["litchi", "kml", "geojson", "gpx"],
-        "project_name": "MultiTest",
-        "waypoints": SAMPLE_WPS,
-        "speed": 10, "altitude": 100,
-    })
+    resp = client.post(
+        "/api/v1/export/multi",
+        json={
+            "formats": ["litchi", "kml", "geojson", "gpx"],
+            "project_name": "MultiTest",
+            "waypoints": SAMPLE_WPS,
+            "speed": 10,
+            "altitude": 100,
+        },
+    )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
-    import zipfile, io
+    import io
+    import zipfile
+
     z = zipfile.ZipFile(io.BytesIO(resp.content))
     assert len(z.namelist()) == 4
 
 
 def test_api_export_unknown_format():
-    resp = client.post("/api/v1/export/nonexistent", json={
-        "project_name": "Test",
-        "waypoints": SAMPLE_WPS,
-    })
+    resp = client.post(
+        "/api/v1/export/nonexistent",
+        json={
+            "project_name": "Test",
+            "waypoints": SAMPLE_WPS,
+        },
+    )
     assert resp.status_code == 400
 
 
 def test_api_export_validation_failure():
     # Empty waypoints -> Litchi CSV returns header-only
-    resp = client.post("/api/v1/export/litchi", json={
-        "project_name": "Test",
-        "waypoints": [],
-    })
+    resp = client.post(
+        "/api/v1/export/litchi",
+        json={
+            "project_name": "Test",
+            "waypoints": [],
+        },
+    )
     assert resp.status_code == 200
     assert "latitude" in resp.text
