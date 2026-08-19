@@ -380,7 +380,8 @@ def _terrain_waypoints_from_segments(
     Returns (waypoints, ref_ground, ground_elevations) where ref_ground is the
     elevation used as the terrain reference for altitude calculation and
     ground_elevations is the raw DEM sample list for the conservative
-    capture-interval footprint.
+    capture-interval footprint. Waypoints track the local ground at `altitude`
+    AGL (MSL = ground elevation + altitude).
     """
     if not segments:
         return [], ref_ground or 0.0, []
@@ -415,7 +416,7 @@ def _terrain_waypoints_from_segments(
         for j in range(n):
             lat, lng, hdg = dem_samples[sample_idx]
             elev = elevations[sample_idx]
-            adj_alt = altitude + (elev - ref_ground)
+            adj_alt = altitude + elev
             sample_idx += 1
 
             should_add = j == 0 or j == n - 1 or abs(elev - last_break_elev) > elevation_threshold
@@ -629,14 +630,15 @@ def compute_grid(req: GridRequest, db_session) -> GridResponse:
     photo_points = photo_points_to_dicts(annotate_photo_points(waypoints, recommended_speed_ms))
 
     # 6b. Universal capture interval recommendation (front overlap -> photo interval)
-    # Terrain-follow uses a conservative minimum footprint computed from the
-    # lowest plausible AGL, so the requested front overlap is kept even where
-    # the drone gets closer to the ground than the planned altitude.
+    # Terrain-follow keeps a ~constant clearance at the planned AGL (waypoints
+    # track the local ground), so the conservative minimum footprint only needs
+    # a small DEM slop; the requested front overlap is honoured everywhere.
     ci_agl = req.altitude
     if wp_mode == "terrain":
         ci_agl = compute_minimum_plausible_agl(
             requested_agl_m=req.altitude,
             ground_elevations=terrain_elevations if terrain_elevations else [],
+            terrain_slop_m=dem_elevation_threshold,
         )
     gsd_ci = calc_gsd(ci_agl, camera.focal_length_mm, camera.pixel_size_um)
     _, fh_ci = calc_footprint(gsd_ci, camera.image_width_px, camera.image_height_px)

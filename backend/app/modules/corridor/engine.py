@@ -220,7 +220,8 @@ def _terrain_waypoints(
 
     Returns (waypoints, ref_ground, ground_elevations) where ref_ground is the
     terrain reference elevation and ground_elevations is the raw DEM sample
-    list used for the conservative capture-interval footprint.
+    list used for the conservative capture-interval footprint. Waypoints track
+    the local ground at `altitude` AGL (MSL = ground elevation + altitude).
     """
     if not segments:
         return [], 0.0, []
@@ -274,7 +275,7 @@ def _terrain_waypoints(
         for k in range(count):
             lat, lng, hdg, forced = samples[base]
             elev = elevations[base]
-            adj_alt = altitude + (elev - ref_ground)
+            adj_alt = altitude + elev
             if not forced and k != 0 and k != count - 1 and abs(elev - last_break_elev) <= elevation_threshold:
                 base += 1
                 continue
@@ -456,14 +457,15 @@ def compute_corridor(req: CorridorRequest, db_session) -> CorridorResponse:
     photo_points = photo_points_to_dicts(annotate_photo_points(waypoints, recommended_speed_ms))
 
     # Universal capture interval recommendation (front overlap -> photo interval)
-    # Terrain-follow uses a conservative minimum footprint computed from the
-    # lowest plausible AGL, so the requested front overlap is kept even where
-    # the drone gets closer to the ground than the planned altitude.
+    # Terrain-follow keeps a ~constant clearance at the planned AGL (waypoints
+    # track the local ground), so the conservative minimum footprint only needs
+    # a small DEM slop; the requested front overlap is honoured everywhere.
     ci_agl = req.altitude
     if wp_mode == "terrain":
         ci_agl = compute_minimum_plausible_agl(
             requested_agl_m=req.altitude,
             ground_elevations=terrain_elevations if terrain_elevations else [],
+            terrain_slop_m=dem_elevation_threshold,
         )
     gsd_ci = calc_gsd(ci_agl, camera.focal_length_mm, camera.pixel_size_um)
     _, fh_ci = calc_footprint(gsd_ci, camera.image_width_px, camera.image_height_px)

@@ -130,18 +130,23 @@ def test_error_invalid_inputs():
 # --- Terrain-follow: conservative minimum footprint ------------------------
 
 
-def test_min_agl_constant_terrain_uses_nominal():
-    assert compute_minimum_plausible_agl(100.0, [600.0, 600.0, 600.0]) == pytest.approx(100.0)
+def test_min_agl_constant_terrain_uses_nominal_minus_slop():
+    assert compute_minimum_plausible_agl(100.0, [600.0, 600.0, 600.0]) == pytest.approx(95.0)
 
 
-def test_min_agl_rising_terrain_reduces_agl():
-    # terrain rising 40 m above the reference -> minimum AGL drops by 40 m
-    assert compute_minimum_plausible_agl(100.0, [600.0, 620.0, 640.0]) == pytest.approx(60.0)
+def test_min_agl_relief_does_not_reduce_agl():
+    # Waypoints track the local ground, so relief (even above the altitude)
+    # never collapses the conservative AGL: only the DEM slop is subtracted.
+    assert compute_minimum_plausible_agl(100.0, [600.0, 620.0, 640.0]) == pytest.approx(95.0)
+    assert compute_minimum_plausible_agl(100.0, [40.0, 100.0, 200.0]) == pytest.approx(95.0)
 
 
-def test_min_agl_falling_terrain_keeps_nominal():
-    # terrain only falls below the reference -> minimum clearance stays nominal
-    assert compute_minimum_plausible_agl(100.0, [640.0, 620.0, 600.0]) == pytest.approx(100.0)
+def test_min_agl_falling_terrain_keeps_planned_minus_slop():
+    assert compute_minimum_plausible_agl(100.0, [640.0, 620.0, 600.0]) == pytest.approx(95.0)
+
+
+def test_min_agl_respects_custom_slop():
+    assert compute_minimum_plausible_agl(100.0, [600.0, 600.0], terrain_slop_m=10.0) == pytest.approx(90.0)
 
 
 def test_min_agl_empty_elevations_falls_back():
@@ -155,7 +160,9 @@ def test_min_agl_all_zero_elevations_falls_back():
 
 
 def test_min_agl_never_below_floor():
-    assert compute_minimum_plausible_agl(50.0, [600.0, 900.0]) == pytest.approx(MIN_PLAUSIBLE_AGL_FLOOR_M)
+    # the floor only guards a degenerate requested AGL, not terrain relief
+    assert compute_minimum_plausible_agl(4.0, [600.0, 600.0]) == pytest.approx(MIN_PLAUSIBLE_AGL_FLOOR_M)
+    assert compute_minimum_plausible_agl(1.0, [600.0, 900.0]) == pytest.approx(MIN_PLAUSIBLE_AGL_FLOOR_M)
 
 
 def _cam_footprint_length(agl_m: float) -> float:
@@ -193,14 +200,15 @@ def test_terrain_interval_uses_conservative_footprint_integer_and_overlap():
         assert cons.effective_front_overlap >= cons.required_front_overlap / 100.0 - 1e-9
 
 
-def test_terrain_incompatible_when_1s_insufficient():
-    # relief >= altitude -> minimum AGL clamps at the floor -> tiny footprint
+def test_terrain_interval_stays_compatible_despite_relief():
+    # relief far above the altitude no longer clamps the AGL to the floor: the
+    # conservative footprint keeps the capture interval usable
     min_agl = compute_minimum_plausible_agl(100.0, [600.0, 800.0])
+    assert min_agl > MIN_PLAUSIBLE_AGL_FLOOR_M
     fh = _cam_footprint_length(min_agl)
-    res = compute_capture_interval(fh, 85.0, 12.0)
-    assert res.status == STATUS_INCOMPATIBLE
-    assert res.recommended_interval_s is None
-    assert res.maximum_speed_for_1s == pytest.approx(res.required_photo_spacing_m / 1.0)
+    res = compute_capture_interval(fh, 75.0, 12.0)
+    assert res.status != STATUS_INCOMPATIBLE
+    assert res.recommended_interval_s is not None
 
 
 # --- Endpoint integration ------------------------------------------------

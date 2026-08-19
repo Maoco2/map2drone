@@ -29,6 +29,13 @@ DEFAULT_MAX_INTERVAL_S = 60.0
 # zero/negative footprint that would otherwise be reported as ERROR.
 MIN_PLAUSIBLE_AGL_FLOOR_M = 1.0
 
+# Safety slop subtracted from the planned AGL to obtain the conservative
+# terrain-follow estimate. Terrain-follow waypoints track the local ground at
+# the requested AGL, so the clearance only dips by the DEM breakpoint threshold
+# between waypoints; this default matches the engine's elevation threshold
+# for a ~30 m DEM (max 5.0 m).
+TERRAIN_FOLLOW_SLOP_M = 5.0
+
 # Ratio above which the integer floor forces "substantially more photos than
 # mathematically necessary" and the result is flagged as WARNING instead of
 # VALID. WARNING never means the required overlap is violated.
@@ -155,16 +162,20 @@ def compute_minimum_plausible_agl(
     requested_agl_m: float,
     ground_elevations: Sequence[float | None],
     fallback_agl_m: Optional[float] = None,
+    terrain_slop_m: float = TERRAIN_FOLLOW_SLOP_M,
 ) -> float:
     """Lowest plausible camera-to-ground distance along a terrain-follow mission.
 
-    Conservative assumption: the drone tracks the reference ground at the
-    requested AGL, and where the terrain rises above the reference the actual
-    clearance shrinks by that relief. The minimum plausible AGL is therefore
-    the requested AGL minus the maximum rise above the reference sample. This
-    yields the *smallest* footprint the payload can see, so the capture
-    interval derived from it always honours the requested front overlap even
-    where the drone gets closer to the ground than planned.
+    The engine places terrain-follow waypoints at `requested AGL` above the
+    local ground (waypoint MSL = ground + requested AGL), so the drone keeps a
+    roughly constant clearance equal to the planned AGL. Between waypoints the
+    drone flies a straight segment and the ground can rise before the next
+    breakpoint waypoint is added; that undershoot is bounded by the DEM
+    breakpoint threshold (`terrain_slop_m`). The minimum plausible AGL is
+    therefore the requested AGL minus the slop, independent of the total relief
+    of the area. This yields the *smallest* footprint the payload can see, so
+    the capture interval derived from it always honours the requested front
+    overlap even where the drone gets closer to the ground than planned.
 
     When no usable ground elevations are available (`ground_elevations` empty
     or all non-positive), the minimum plausible AGL is `fallback_agl_m` if
@@ -175,9 +186,7 @@ def compute_minimum_plausible_agl(
     if not valid:
         value = fallback_agl_m if fallback_agl_m is not None else requested_agl_m
     else:
-        ref_ground = valid[0]
-        max_rise = max(0.0, max(valid) - ref_ground)
-        value = requested_agl_m - max_rise
+        value = requested_agl_m - terrain_slop_m
     return max(value, MIN_PLAUSIBLE_AGL_FLOOR_M)
 
 
