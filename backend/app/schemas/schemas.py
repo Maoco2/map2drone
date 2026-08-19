@@ -1,8 +1,8 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class RegisterRequest(BaseModel):
@@ -369,90 +369,6 @@ class MissionValidateResponse(BaseModel):
     warnings: list[dict] = []
 
 
-class OptimizerEvaluateRequest(BaseModel):
-    mission: dict
-    drone_profile: Optional[dict] = None
-    camera_profile: Optional[dict] = None
-    constraints: Optional[dict] = None
-    weights: Optional[dict] = None
-
-
-class OptimizerEvaluateResponse(BaseModel):
-    valid: bool
-    status: str = "VALID"
-    metrics: dict = {}
-    score: Optional[dict] = None
-    warnings: list[str] = []
-    validation: Optional[dict] = None
-
-
-# ── Optimizer solve (Fase 10C-10) ────────────────────────────────────────────
-
-
-class OptimizerVariableDeclaration(BaseModel):
-    """Single optimizable variable declaration (mirrors the optimizer contract).
-
-    ``mode`` is ``fixed`` / ``range`` / ``candidate_values``; only the fields
-    relevant to the mode are used.
-    """
-
-    name: str
-    mode: str = "fixed"
-    value: Optional[Any] = None
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None
-    step: Optional[float] = None
-    values: list[Any] = Field(default_factory=list)
-
-
-class OptimizerVariablesRequest(BaseModel):
-    variables: list[OptimizerVariableDeclaration] = Field(default_factory=list)
-
-
-class OptimizerSolveRequest(BaseModel):
-    """POST /optimizer/solve payload.
-
-    Exactly one of ``grid`` / ``corridor`` must be provided (the base planning
-    request the search starts from). ``variables`` declares what to optimize;
-    when omitted the base mission itself is evaluated as a single candidate.
-    """
-
-    grid: Optional[GridRequest] = None
-    corridor: Optional[CorridorRequest] = None
-    variables: Optional[OptimizerVariablesRequest] = None
-    constraints: Optional[dict] = None
-    weights: Optional[dict] = None
-    max_candidates: int = 1000
-
-    @model_validator(mode="after")
-    def _validate(self) -> "OptimizerSolveRequest":
-        if (self.grid is None) == (self.corridor is None):
-            raise ValueError("Provide exactly one of 'grid' or 'corridor'")
-        if self.max_candidates < 1:
-            raise ValueError("max_candidates must be >= 1")
-        return self
-
-
-class OptimizerCandidateResponse(BaseModel):
-    """One selected candidate: its variable values, rebuilt mission and score."""
-
-    label: str
-    variable_values: dict = Field(default_factory=dict)
-    mission: dict = Field(default_factory=dict)
-    score: Optional[dict] = None
-
-
-class OptimizerSolveResponse(BaseModel):
-    status: str
-    message: str = ""
-    best_candidate: Optional[OptimizerCandidateResponse] = None
-    best_score: Optional[dict] = None
-    alternatives: list[OptimizerCandidateResponse] = Field(default_factory=list)
-    stats: dict = Field(default_factory=dict)
-    warnings: list[str] = Field(default_factory=list)
-    explanation: Optional[dict] = None
-
-
 class MultiExportRequest(BaseModel):
     formats: list[str] = ["litchi"]
     project_name: str = "Mission"
@@ -482,9 +398,9 @@ class MultiExportRequest(BaseModel):
 class ExportUmmRequest(BaseModel):
     """Export a Universal Mission directly (no legacy rebuild — Fase 10F).
 
-    ``mission`` is a serialized :class:`UniversalMission` (the winner payload
-    from the optimizer). ``options`` optionally overrides exporter options
-    (e.g. LCHM ``path_mode``); every value is otherwise read from the mission.
+    ``mission`` is a serialized :class:`UniversalMission`. ``options``
+    optionally overrides exporter options (e.g. LCHM ``path_mode``); every
+    value is otherwise read from the mission.
     """
 
     mission: dict
@@ -526,56 +442,3 @@ class ExportCheckUmmRequest(BaseModel):
 
 class ExportCheckUmmResponse(BaseModel):
     items: list[ExportReadinessItem] = Field(default_factory=list)
-
-
-# ── Optimizer apply (Fase 10F-1/2) ───────────────────────────────────────────
-
-
-class OptimizerApplyRequest(BaseModel):
-    """Apply the winner of an optimizer search to the Universal Mission.
-
-    ``solve_request`` is the original ``/optimizer/solve`` payload (the backend
-    re-derives the baseline and reproduces the winner deterministically from
-    it); ``winner`` is ``best_candidate.mission`` and ``winner_variable_values``
-    is ``best_candidate.variable_values`` from the solve response.
-    """
-
-    solve_request: OptimizerSolveRequest
-    winner: dict
-    winner_variable_values: dict = Field(default_factory=dict)
-    project_id: Optional[str] = None
-    original_mission_id: Optional[str] = None
-    name: Optional[str] = None
-
-
-class MissionComparisonItem(BaseModel):
-    """One row of the Baseline vs Winner comparison table (Fase 10F-2)."""
-
-    metric: str
-    label: str
-    baseline: Optional[float] = None
-    winner: Optional[float] = None
-    delta: Optional[float] = None
-    unit: str = ""
-
-
-class OptimizerApplyResponse(BaseModel):
-    """Backend result of applying the winner (Fase 10F-1).
-
-    ``baseline_mission`` / ``winner_mission`` are the serialized Universal
-    Missions (winner == the mission the search evaluated, re-derived and
-    verified). ``comparison`` is the before/after table, ``modified_variables``
-    the variables that changed, and ``verification`` reports the deterministic
-    rebuild check.
-    """
-
-    applied: bool = True
-    mission_id: Optional[str] = None
-    baseline_mission: dict = Field(default_factory=dict)
-    baseline_score: Optional[dict] = None
-    winner_mission: dict = Field(default_factory=dict)
-    winner_score: Optional[dict] = None
-    comparison: list[MissionComparisonItem] = Field(default_factory=list)
-    modified_variables: list[str] = Field(default_factory=list)
-    verification: dict = Field(default_factory=dict)
-    warnings: list[str] = Field(default_factory=list)

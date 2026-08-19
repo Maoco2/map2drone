@@ -1,58 +1,25 @@
-"""Fase 10F end-to-end flow tests (Planning → Optimizer → Apply → UMM → Export).
+"""End-to-end UMM export flow tests (Planning → UMM → Export).
 
-Caso A: small grid → apply → LCHM + Litchi CSV exports match the winner.
+Caso A: small grid → LCHM + Litchi CSV exports match the planned mission.
 Caso B: grid over the LCHM 99-waypoint capacity → BLOCKED ``split_required``,
         and the UMM export endpoint refuses instead of emitting a corrupt file.
-Caso C: corridor → apply → LCHM export matches the winner.
-Caso D: photo capture NONE → LCHM is emitted without the photo trailer.
-Caso E: DISTANCE photo capture → LCHM carries the photo trailer.
-Caso F: TIME capture interval floors only in the Litchi export chain (integer in
+Caso C: photo capture NONE → LCHM is emitted without the photo trailer.
+Caso D: DISTANCE photo capture → LCHM carries the photo trailer.
+Caso E: TIME capture interval floors only in the Litchi export chain (integer in
         CSV) while the Universal Mission keeps the scientific decimal value.
 """
 
 from fastapi.testclient import TestClient
 
-from app.core.database import Base, engine
+from app.core.database import get_db
 from app.main import app
+from app.models.schemas import Camera, Drone
 from app.modules.export.litchi_lchm import LCHM_TRAILER_PHOTO_BLOCK_SIZE, parse_lchm
+from app.modules.mission import build_universal_mission
+from app.modules.planning.engine import compute_grid
+from app.schemas.schemas import GridRequest
 
 client = TestClient(app)
-
-
-def _ensure_db():
-    Base.metadata.create_all(bind=engine)
-
-
-def _auth_headers() -> dict:
-    _ensure_db()
-    reg = client.post(
-        "/api/v1/auth/register",
-        json={
-            "full_name": "E2E 10F",
-            "email": "e2e10f@test.dev",
-            "password": "secret123",
-            "country": "",
-            "city": "",
-            "phone": "",
-            "gender": "",
-            "profession": "",
-        },
-    )
-    if reg.status_code != 200:
-        login = client.post("/api/v1/auth/login", json={"email": "e2e10f@test.dev", "password": "secret123"})
-        assert login.status_code == 200
-        token = login.json()["access_token"]
-    else:
-        token = reg.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
-
-
-def _project_id() -> str:
-    headers = _auth_headers()
-    proj = client.post("/api/v1/projects", json={"name": "E2E 10F Project"}, headers=headers)
-    assert proj.status_code == 200
-    return proj.json()["id"]
-
 
 _POLYGON = {
     "type": "Polygon",
@@ -65,11 +32,6 @@ _POLYGON = {
             [-5.99, 37.35],
         ]
     ],
-}
-
-_CENTERLINE = {
-    "type": "LineString",
-    "coordinates": [[-5.99, 37.35], [-5.97, 37.36], [-5.95, 37.37]],
 }
 
 
@@ -87,92 +49,62 @@ def _grid_payload(**overrides) -> dict:
     return payload
 
 
-def _small_grid_payload() -> dict:
-    return _grid_payload(altitude=250.0, overlap_frontal=80.0, overlap_lateral=75.0)
+def _base_mission(**overrides) -> dict:
+    """Build the planned Universal Mission through the planning engine
+    (the same path the planner endpoint uses)."""
+    payload = _grid_payload(**overrides)
+    db = next(get_db())
+    try:
+        req = GridRequest(**payload)
+        result = compute_grid(req, db)
+        camera = db.query(Camera).filter(Camera.id == req.camera_id).first()
+        drone = db.query(Drone).filter(Drone.id == req.drone_id).first()
+        mission = build_universal_mission("grid", req, result, camera=camera, drone=drone)
+        return mission.model_dump(mode="json")
+    finally:
+        db.close()
 
 
-def _corridor_payload() -> dict:
-    return {
-        "centerline": _CENTERLINE,
-        "width_left": 60.0,
-        "width_right": 60.0,
-        "altitude": 100.0,
-        "overlap_frontal": 75.0,
-        "overlap_lateral": 65.0,
-        "camera_id": "cam-1-20mp",
-        "drone_id": "dji-p4rtk",
-        "altitude_mode": "takeoff",
-    }
+def _small_grid_mission() -> dict:
+    return _base_mission(altitude=250.0, overlap_frontal=80.0, overlap_lateral=75.0)
 
 
-def _variables(values):
-    return {"variables": [{"name": "altitude_m", "mode": "candidate_values", "values": values}]}
+# ── Caso A: grid → LCHM + Litchi CSV ─────────────────────────────────────────
 
 
-def _solve(body) -> dict:
-    resp = client.post("/api/v1/optimizer/solve", json=body)
-    assert resp.status_code == 200, resp.text
-    return resp.json()
-
-
-def _apply(winner, solve_request, project_id=None) -> dict:
-    resp = client.post(
-        "/api/v1/optimizer/apply",
-        json={
-            "solve_request": solve_request,
-            "winner": winner["mission"],
-            "winner_variable_values": winner["variable_values"],
-            "project_id": project_id,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    return resp.json()
-
-
-# ── Caso A: grid → apply → LCHM + Litchi CSV ─────────────────────────────────
-
-
-def test_e2e_grid_apply_export_lchm_and_litchi():
-    project_id = _project_id()
-    solve_req = {"grid": _small_grid_payload(), "variables": _variables([250])}
-    solved = _solve(solve_req)
-    winner = solved["best_candidate"]
-    assert len(winner["mission"]["waypoints"]) <= 99
-
-    applied = _apply(winner, solve_req, project_id)
-    assert applied["mission_id"] is not None
-    assert applied["verification"]["verified"] is True
+def test_e2e_grid_export_lchm_and_litchi():
+    mission = _small_grid_mission()
+    assert len(mission["waypoints"]) <= 99
 
     resp = client.post(
         "/api/v1/export/umm/litchi_lchm",
-        json={"mission": applied["winner_mission"]},
+        json={"mission": mission},
     )
     assert resp.status_code == 200, resp.text
     parsed = parse_lchm(resp.content)
-    assert parsed.waypoint_count == len(applied["winner_mission"]["waypoints"])
+    assert parsed.waypoint_count == len(mission["waypoints"])
 
     resp = client.post(
         "/api/v1/export/umm/litchi",
-        json={"mission": applied["winner_mission"]},
+        json={"mission": mission},
     )
     assert resp.status_code == 200, resp.text
     csv = resp.content.decode("utf-8")
     lines = [line for line in csv.splitlines() if line.strip()]
     assert lines[0].startswith("latitude,longitude")
-    assert len(lines) - 1 == len(applied["winner_mission"]["waypoints"])
+    assert len(lines) - 1 == len(mission["waypoints"])
 
 
 # ── Caso B: over 99 waypoints → BLOCKED, export refused ──────────────────────
 
 
 def test_e2e_grid_over_99_blocked_and_export_refused():
-    solve_req = {"grid": _grid_payload(), "variables": _variables([80, 100, 120])}
-    winner = _solve(solve_req)["best_candidate"]
-    assert len(winner["mission"]["waypoints"]) > 99
+    mission = _base_mission()
+    assert len(mission["waypoints"]) > 99
 
     resp = client.post(
         "/api/v1/export/check-umm",
-        json={"mission": winner["mission"], "formats": ["litchi_lchm"]},
+        json={"mission": mission, "formats": ["litchi_lchm"]},
     )
     assert resp.status_code == 200, resp.text
     item = resp.json()["items"][0]
@@ -181,43 +113,20 @@ def test_e2e_grid_over_99_blocked_and_export_refused():
 
     resp = client.post(
         "/api/v1/export/umm/litchi_lchm",
-        json={"mission": winner["mission"]},
+        json={"mission": mission},
     )
     assert resp.status_code == 400
 
 
-# ── Caso C: corridor → apply → LCHM ──────────────────────────────────────────
-
-
-def test_e2e_corridor_apply_export_lchm():
-    project_id = _project_id()
-    solve_req = {"corridor": _corridor_payload(), "variables": _variables([100])}
-    solved = _solve(solve_req)
-    winner = solved["best_candidate"]
-    assert winner["mission"]["mission_type"] == "linear_corridor"
-
-    applied = _apply(winner, solve_req, project_id)
-    assert applied["verification"]["verified"] is True
-    assert applied["mission_id"] is not None
-
-    resp = client.post(
-        "/api/v1/export/umm/litchi_lchm",
-        json={"mission": applied["winner_mission"]},
-    )
-    assert resp.status_code == 200, resp.text
-    parsed = parse_lchm(resp.content)
-    assert parsed.waypoint_count == len(applied["winner_mission"]["waypoints"])
-
-
-# ── Caso D: photo capture NONE → LCHM without trailer ────────────────────────
+# ── Caso C: photo capture NONE → LCHM without trailer ────────────────────────
 
 
 def test_e2e_lchm_without_photo_trailer_when_none():
-    winner = _solve({"grid": _small_grid_payload(), "variables": _variables([250])})["best_candidate"]
+    mission = _small_grid_mission()
 
     resp = client.post(
         "/api/v1/export/umm/litchi_lchm",
-        json={"mission": winner["mission"], "options": {"photo_capture": None}},
+        json={"mission": mission, "options": {"photo_capture": None}},
     )
     assert resp.status_code == 200, resp.text
     no_trailer = resp.content
@@ -226,7 +135,7 @@ def test_e2e_lchm_without_photo_trailer_when_none():
     resp = client.post(
         "/api/v1/export/umm/litchi_lchm",
         json={
-            "mission": winner["mission"],
+            "mission": mission,
             "options": {"photo_capture": {"mode": "TIME", "time_interval_s": 5}},
         },
     )
@@ -235,15 +144,15 @@ def test_e2e_lchm_without_photo_trailer_when_none():
     assert len(with_trailer) - len(no_trailer) >= LCHM_TRAILER_PHOTO_BLOCK_SIZE
 
 
-# ── Caso E: DISTANCE photo capture → LCHM trailer ────────────────────────────
+# ── Caso D: DISTANCE photo capture → LCHM trailer ────────────────────────────
 
 
 def test_e2e_lchm_distance_photo_capture():
-    winner = _solve({"grid": _small_grid_payload(), "variables": _variables([250])})["best_candidate"]
+    mission = _small_grid_mission()
     resp = client.post(
         "/api/v1/export/umm/litchi_lchm",
         json={
-            "mission": winner["mission"],
+            "mission": mission,
             "options": {"photo_capture": {"mode": "DISTANCE", "distance_interval_m": 20.5}},
         },
     )
@@ -251,13 +160,11 @@ def test_e2e_lchm_distance_photo_capture():
     assert len(resp.content) > parse_lchm(resp.content).waypoint_count  # trailer present
 
 
-# ── Caso F: TIME interval floors only in the Litchi export chain ─────────────
+# ── Caso E: TIME interval floors only in the Litchi export chain ─────────────
 
 
 def test_e2e_time_floor_only_in_litchi_export_chain():
-    solved = _solve({"grid": _small_grid_payload(), "variables": _variables([250])})
-    winner = solved["best_candidate"]
-    mission = winner["mission"]
+    mission = _small_grid_mission()
 
     # The Universal Mission keeps the scientific (decimal) value.
     scientific = mission["capture_plan"]["scientific_interval_s"]

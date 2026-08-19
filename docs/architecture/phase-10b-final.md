@@ -1,4 +1,4 @@
-# Fase 10B — Informe final (Universal Mission Model extendido + arquitectura del Optimizer)
+# Fase 10B — Informe final (Universal Mission Model extendido)
 
 **Fecha:** 2026-08-18
 **Referencia:** `phase-10a-final.md` (estado antes de la fase).
@@ -7,14 +7,15 @@
 La Fase 10B extendió el **Universal Mission Model (UMM)** como única fuente de
 verdad normativa de la misión fotogramétrica (parámetros, métricas, waypoints
 tipados, segmentos, plan de captura, plan de giro, perfiles de dron y cámara,
-bloque de geometría) y preparó la **arquitectura base del Photogrammetry Mission
-Optimizer**: constraints, scoring, evaluator y el stub `Optimizer` (la búsqueda
-automática es Fase 10C).
+bloque de geometría). El **Photogrammetry Mission Optimizer** que se esbozó en
+esta fase fue **eliminado posteriormente** (decisión de producto): el módulo
+`modules/optimizer/`, sus endpoints `/optimizer/*` y su UI ya no existen; el UMM
+y el validador sí permanecen.
 
 Reglas respetadas: **no** se tocó CaptureInterval, la física de TurnRadius, la
 estructura binaria/trailer de LCHM ni la política `floor`; **no** se implementó
 optimización automática; **no** se inventaron parámetros de drones/cámaras; los
-exporters no interpretan ni recalculan la misión. **Sin commit.**
+exporters no interpretan ni recalcular la misión. **Sin commit.**
 
 ---
 
@@ -29,12 +30,11 @@ exporters no interpretan ni recalculan la misión. **Sin commit.**
 | 5 | **`mission/validator.py`** — `UniversalMissionValidator`: errores/warnings/status por geometría, fotogrametría, vuelo, captura, giro y batería; **no muta** la misión |
 | 6 | **`mission/serializer.py`** — `mission_to_dict/from_dict/to_json/from_json/round_trip` |
 | 7 | **`mission/__init__.py`** — exports públicos actualizados |
-| 8 | **`optimizer/`** — `models.py` (`OptimizerInput`, `OptimizationConstraints`, `OptimizationWeights`, `MissionScore`, `CandidateMission`, `EvaluationResult`, `OptimizationResult`), `constraints.py` (`evaluate_constraints`), `objective.py` (`score_mission`), `evaluator.py` (`evaluate`/`evaluate_candidate`), `optimizer.py` (**stub**: `solve()` → `NotImplementedError`) |
-| 9 | **`export/adapters.py`** — `from_universal_mission` → `MissionExportData` (transforma, no recalcula; `floor(scientific)` **solo aquí** como fallback Litchi; `path_mode` CURVED_TURNS/STRAIGHT; `photo_capture` TIME/DISTANCE) |
-| 10 | **Schemas + endpoints** — `MissionValidateRequest/Response`, `OptimizerEvaluateRequest/Response`; helper `_umm_legacy_json` (grid + corridor); **POST `/api/v1/missions/validate`** y **POST `/api/v1/optimizer/evaluate`** |
-| 11 | **Frontend (solo tipos)** — `frontend/src/shared/types/project.ts`: `UniversalMission`, `UniversalWaypoint`, `FlightSegment`, `CapturePlan`, `TurnPlan`, `DroneProfile`, `CameraProfile`, `UniversalMissionMetrics`, `OptimizationConstraints`, `OptimizationWeights`, `MissionScore`, `OptimizerInput`, `OptimizerEvaluateResponse`, `MissionValidateResponse` |
-| 12 | **Tests** — `test_umm_10b.py`, `test_validator.py`, `test_optimizer.py`, `test_export_adapter.py`, `test_api_fase10b.py` |
-| 13 | Regresión completa (pytest 332, ruff en archivos 10B, tsc, build, vitest) |
+| 8 | **`export/adapters.py`** — `from_universal_mission` → `MissionExportData` (transforma, no recalcula; `floor(scientific)` **solo aquí** como fallback Litchi; `path_mode` CURVED_TURNS/STRAIGHT; `photo_capture` TIME/DISTANCE) |
+| 9 | **Schemas + endpoints** — `MissionValidateRequest/Response`; helper `_umm_legacy_json` (grid + corridor); **POST `/api/v1/missions/validate`** |
+| 10 | **Frontend (solo tipos)** — `frontend/src/shared/types/project.ts`: `UniversalMission`, `UniversalWaypoint`, `FlightSegment`, `CapturePlan`, `TurnPlan`, `DroneProfile`, `CameraProfile`, `UniversalMissionMetrics`, `MissionValidateResponse` |
+| 11 | **Tests** — `test_umm_10b.py`, `test_validator.py`, `test_export_adapter.py`, `test_api_fase10b.py` |
+| 12 | Regresión completa (pytest 332, ruff en archivos 10B, tsc, build, vitest) |
 
 ---
 
@@ -49,20 +49,13 @@ modules/mission/               ← Universal Mission Model (fuente única normat
   validator.py                 UniversalMissionValidator (no muta)
   serializer.py                round-trip dict/JSON
 
-modules/optimizer/             ← arquitectura base del Photogrammetry Optimizer (10C: search)
-  models.py                    inputs/constraints/weights/score/candidate/result
-  constraints.py               evaluate_constraints (violaciones → inválido)
-  objective.py                 score_mission [0,1] por criterio (solo lee el UMM)
-  evaluator.py                 evaluate() = validator + constraints + score
-  optimizer.py                 Optimizer (stub: solve() NotImplementedError)
-
 modules/export/adapters.py     UMM → MissionExportData (transforma; floor Litchi aquí)
 
-api/v1/endpoints.py            _umm_legacy_json · POST /missions/validate · POST /optimizer/evaluate
-schemas/schemas.py             peticiones/respuestas de validate y evaluate
+api/v1/endpoints.py            _umm_legacy_json · POST /missions/validate
+schemas/schemas.py             peticiones/respuestas de validate
 ```
 
-**Flujo de datos:** los motores (grid/corridor) emiten su resultado → `build_universal_mission` lo normaliza al UMM (bloque 10B) → `from_universal_mission` lo transforma a `MissionExportData` → los exporters existentes lo vuelcan a cada formato. `/optimizer/evaluate` ejecuta `evaluate()` sobre el UMM (validate + constraints + score) sin modificar nada.
+**Flujo de datos:** los motores (grid/corridor) emiten su resultado → `build_universal_mission` lo normaliza al UMM (bloque 10B) → `from_universal_mission` lo transforma a `MissionExportData` → los exporters existentes lo vuelcan a cada formato.
 
 ---
 
@@ -80,18 +73,15 @@ schemas/schemas.py             peticiones/respuestas de validate y evaluate
 | Endpoint | Petición | Respuesta |
 |---|---|---|
 | `POST /api/v1/missions/validate` | `MissionValidateRequest.payload` (dict UMM o legacy) | `valid`, `status` (VALID/WARNING/INVALID), `errors[]`, `warnings[]`, `mission` (UMM normalizado) |
-| `POST /api/v1/optimizer/evaluate` | `OptimizerEvaluateRequest.mission` (UMM) + `constraints` opcionales | `valid`, `status`, `score` (per-criterion + `total_score`), `metrics`, `validation`, `warnings` |
-
-`/optimizer/run` **no** se creó (10C).
 
 ---
 
 ## E. Tests
 
 Nuevos: **51** en `backend/tests/` (bloques ricos del UMM, round-trip, versionado,
-coerción legacy, capture NONE/TIME/DISTANCE, validator por categoría, optimizer
-constraints/score/evaluate, adapter→LCHM y equivalencia con el grid real, API
-validate/evaluate). Total backend: **332 passed**.
+coerción legacy, capture NONE/TIME/DISTANCE, validator por categoría,
+adapter→LCHM y equivalencia con el grid real, API validate). Total backend:
+**332 passed**.
 
 Equivalencia verificada: `UMM → from_universal_mission → LCHM` conserva
 waypoint_count, speed, `CURVED_TURNS`, radio de curva y `TIME interval`. El grid
@@ -128,16 +118,10 @@ nivel adapter.
 - **Sin decisiones de compatibilidad rotas:** se procedió sin detenerse (la única
   anomalía detectada —el `is_straight` inexistente en `FlightSegment`— era un bug
   del test recién escrito y se corrigió).
-- `OptimizationWeights` y umbrales de `score_mission` son provisionales: la
-  calibración definitiva es parte de 10C.
 
 ---
 
-## H. Qué queda para la Fase 10C
+## H. Qué queda después de 10B
 
-- `Optimizer.solve()` (búsqueda: variación de altura/overlaps/velocidad/intervalo/
-  radio, respetando constraints y sin tocar los motores).
-- Calibración de pesos (`OptimizationWeights`), endpoint `/optimizer/run` y
-  frontend de optimización.
-- Decidir el manejo de misiones >99 waypoints en el exportador LCHM (guard/de
-  splitting) y limpiar el lint preexistente.
+- **Split automático LCHM > 99**: decidir el manejo de misiones >99 waypoints en
+  el exportador LCHM (guard/splitting) y limpiar el lint preexistente.

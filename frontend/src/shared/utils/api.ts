@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { Project, Mission, Drone, Camera, GridResult, CorridorParseResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem, TurnRadiusResponse, TurnRadiusRecomputeRequest, OptimizerSolveRequest, OptimizerSolveResponse, OptimizerApplyRequest, OptimizerApplyResponse, ExportCheckUmmResponse } from '@/shared/types/project';
+import type { Project, Mission, Drone, Camera, GridResult, CorridorParseResponse, TokenResponse, User, ExportFormat, ExportFormatCheckItem, TurnRadiusResponse, TurnRadiusRecomputeRequest, ExportCheckUmmResponse } from '@/shared/types/project';
 
 const API_BASE = (import.meta as any).env?.VITE_API_BASE || '/api/v1';
 
@@ -178,19 +178,6 @@ export const api = {
       }),
     turnRadius: (data: TurnRadiusRecomputeRequest) =>
       fetchJson<TurnRadiusResponse>('/planning/turn-radius', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-  },
-  optimizer: {
-    solve: (data: OptimizerSolveRequest) =>
-      fetchJson<OptimizerSolveResponse>('/optimizer/solve', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-
-    apply: (data: OptimizerApplyRequest) =>
-      fetchJson<OptimizerApplyResponse>('/optimizer/apply', {
         method: 'POST',
         body: JSON.stringify(data),
       }),

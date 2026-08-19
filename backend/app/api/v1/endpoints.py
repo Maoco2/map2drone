@@ -3,7 +3,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.core.auth import create_access_token, get_current_user_id, hash_password, verify_password
@@ -15,15 +14,6 @@ from app.modules.corridor.parsers import load_centerline
 from app.modules.export.adapters import from_universal_mission
 from app.modules.export.readiness import check_mission_readiness
 from app.modules.mission import UniversalMissionValidator, build_universal_mission, parse_mission_blob, to_legacy_dict
-from app.modules.optimizer import Optimizer
-from app.modules.optimizer import evaluate as optimizer_evaluate
-from app.modules.optimizer.apply import WinnerMismatchError, apply_winner
-from app.modules.optimizer.models import OptimizationConstraints, OptimizationWeights, OptimizerInput
-from app.modules.optimizer.variables import (
-    OptimizationVariable,
-    OptimizationVariables,
-    VariableMode,
-)
 from app.modules.planning.engine import compute_grid, compute_gsd
 from app.modules.planning.turn_radius.integration import compute_turn_radius_plan
 from app.schemas.schemas import (
@@ -46,13 +36,6 @@ from app.schemas.schemas import (
     MissionUpdate,
     MissionValidateRequest,
     MissionValidateResponse,
-    OptimizerApplyRequest,
-    OptimizerApplyResponse,
-    OptimizerCandidateResponse,
-    OptimizerEvaluateRequest,
-    OptimizerEvaluateResponse,
-    OptimizerSolveRequest,
-    OptimizerSolveResponse,
     ProjectCreate,
     ProjectResponse,
     RegisterRequest,
@@ -435,7 +418,7 @@ def calculate_turn_radius(req: TurnRadiusRequest):
         raise HTTPException(500, f"Turn radius computation failed: {str(e)}")
 
 
-# ── Universal Mission validation & optimizer (Fase 10B) ─────────────────────
+# ── Universal Mission validation ─────────────────────────────────────────────
 
 
 @router.post("/missions/validate", response_model=MissionValidateResponse)
@@ -451,165 +434,6 @@ def validate_mission(req: MissionValidateRequest):
         status=result.status,
         errors=[e.model_dump(mode="json") for e in result.errors],
         warnings=[w.model_dump(mode="json") for w in result.warnings],
-    )
-
-
-@router.post("/optimizer/evaluate", response_model=OptimizerEvaluateResponse)
-def optimizer_evaluate_endpoint(req: OptimizerEvaluateRequest):
-    """Evaluate a single mission/candidate (no automatic search — that is Fase 10C)."""
-    try:
-        mission = parse_mission_blob(req.mission)
-    except (ValueError, TypeError) as e:
-        raise HTTPException(400, f"Invalid mission payload: {e}")
-    constraints = OptimizationConstraints(**req.constraints) if req.constraints else None
-    weights = OptimizationWeights(**req.weights) if req.weights else None
-    result = optimizer_evaluate(mission, constraints=constraints, weights=weights)
-    return OptimizerEvaluateResponse(
-        valid=result.valid,
-        status=result.status,
-        metrics=result.metrics,
-        score=result.score.model_dump(mode="json") if result.score else None,
-        warnings=result.warnings,
-        validation=result.validation,
-    )
-
-
-# ── Optimizer solve (Fase 10C-10) ────────────────────────────────────────────
-
-
-def _build_base_mission(req: GridRequest | CorridorRequest, db: Session):
-    """Build the base Universal Mission from a planning request (profile-aware)."""
-    mission_type = "linear_corridor" if isinstance(req, CorridorRequest) else "grid"
-    req.camera_id = _resolve_camera_id(req, db)
-    result = compute_corridor(req, db) if mission_type == "linear_corridor" else compute_grid(req, db)
-    camera = db.query(Camera).filter(Camera.id == req.camera_id).first() if req.camera_id else None
-    drone = db.query(Drone).filter(Drone.id == req.drone_id).first() if req.drone_id else None
-    return build_universal_mission(mission_type, req, result, camera=camera, drone=drone)
-
-
-def _optimizer_variables(vars_req):
-    """Map the API variable declarations onto the optimizer contract (validated)."""
-    if vars_req is None or not vars_req.variables:
-        return None
-    return OptimizationVariables(
-        variables=[
-            OptimizationVariable(
-                name=d.name,
-                mode=VariableMode(d.mode),
-                value=d.value,
-                min_value=d.min_value,
-                max_value=d.max_value,
-                step=d.step,
-                values=d.values,
-            )
-            for d in vars_req.variables
-        ]
-    )
-
-
-def _solve_response(result) -> OptimizerSolveResponse:
-    """Map an OptimizationResult onto the API response shape."""
-    by_values = {json.dumps(e.variable_values, sort_keys=True): e for e in result.evaluations}
-
-    def _candidate(cand) -> Optional[OptimizerCandidateResponse]:
-        if cand is None:
-            return None
-        ev = by_values.get(json.dumps(cand.variable_values, sort_keys=True))
-        return OptimizerCandidateResponse(
-            label=cand.label,
-            variable_values=cand.variable_values,
-            mission=cand.mission.model_dump(mode="json"),
-            score=ev.score.model_dump(mode="json") if ev is not None and ev.score else None,
-        )
-
-    return OptimizerSolveResponse(
-        status=result.status,
-        message=result.message,
-        best_candidate=_candidate(result.best_candidate),
-        best_score=result.best_score.model_dump(mode="json") if result.best_score else None,
-        alternatives=[_candidate(a) for a in result.alternatives],
-        stats=result.explanation.stats if result.explanation else {},
-        warnings=result.explanation.warnings if result.explanation else [],
-        explanation=result.explanation.model_dump(mode="json") if result.explanation else None,
-    )
-
-
-@router.post("/optimizer/solve", response_model=OptimizerSolveResponse)
-def optimizer_solve_endpoint(req: OptimizerSolveRequest, db: Session = Depends(get_db)):
-    """Deterministic optimization search (Fase 10C-10)."""
-    try:
-        base_req = req.grid if req.grid is not None else req.corridor
-        mission = _build_base_mission(base_req, db)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-    except Exception as e:
-        raise HTTPException(500, f"Planning failed: {str(e)}")
-
-    try:
-        variables = _optimizer_variables(req.variables)
-        constraints = OptimizationConstraints(**req.constraints) if req.constraints else None
-        weights = OptimizationWeights(**req.weights) if req.weights else None
-    except (ValueError, ValidationError) as e:
-        raise HTTPException(400, f"Invalid optimizer input: {e}")
-
-    inp = OptimizerInput(
-        mission=mission,
-        request=base_req,
-        constraints=constraints,
-        weights=weights,
-        variables=variables,
-        max_candidates=req.max_candidates,
-    )
-    try:
-        result = Optimizer().solve(inp, db_session=db)
-    except Exception as e:
-        raise HTTPException(500, f"Optimization failed: {str(e)}")
-    return _solve_response(result)
-
-
-# ── Optimizer apply (Fase 10F-1/2) ───────────────────────────────────────────
-
-
-@router.post("/optimizer/apply", response_model=OptimizerApplyResponse)
-def optimizer_apply_endpoint(req: OptimizerApplyRequest, db: Session = Depends(get_db)):
-    """Apply the winner of a previous ``/optimizer/solve`` run to the UMM.
-
-    Backend-authoritative: re-derives the baseline from the original request,
-    verifies the winner is reproducible and persists it as a new mission.
-    """
-    try:
-        constraints = (
-            OptimizationConstraints(**req.solve_request.constraints) if req.solve_request.constraints else None
-        )
-        weights = OptimizationWeights(**req.solve_request.weights) if req.solve_request.weights else None
-        result = apply_winner(
-            req.solve_request,
-            req.winner,
-            req.winner_variable_values,
-            constraints,
-            weights,
-            db,
-            project_id=req.project_id,
-            original_mission_id=req.original_mission_id,
-            name=req.name,
-        )
-    except WinnerMismatchError as e:
-        raise HTTPException(409, str(e))
-    except ValueError as e:
-        raise HTTPException(400, f"Invalid apply request: {e}")
-    except Exception as e:
-        raise HTTPException(500, f"Apply failed: {str(e)}")
-    return OptimizerApplyResponse(
-        applied=True,
-        mission_id=result.mission_id,
-        baseline_mission=to_legacy_dict(result.baseline_mission),
-        baseline_score=result.baseline_score.model_dump(mode="json") if result.baseline_score else None,
-        winner_mission=to_legacy_dict(result.applied_winner),
-        winner_score=result.winner_score.model_dump(mode="json") if result.winner_score else None,
-        comparison=result.comparison,
-        modified_variables=result.modified,
-        verification=result.verification,
-        warnings=result.warnings,
     )
 
 

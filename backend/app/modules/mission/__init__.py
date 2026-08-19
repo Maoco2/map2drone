@@ -2,9 +2,9 @@
 
 A typed, validated, serializable mission payload shared by every mission type,
 with a backward-compatible serializer for ``Mission.grid_result_json``. Fase
-10B adds the rich blocks the Photogrammetry Mission Optimizer and the
-exporters consume: typed waypoints, flight segments, capture plan, turn plan
-and drone/camera profiles, plus a non-mutating validator.
+10B adds the rich blocks the exporters consume: typed waypoints, flight
+segments, capture plan, turn plan and drone/camera profiles, plus a
+non-mutating validator.
 """
 
 from .builder import build_universal_mission, to_legacy_dict

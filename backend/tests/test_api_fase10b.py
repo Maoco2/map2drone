@@ -1,4 +1,4 @@
-"""API tests for Fase 10B endpoints: /missions/validate and /optimizer/evaluate."""
+"""API tests for the /missions/validate endpoint."""
 
 from fastapi.testclient import TestClient
 
@@ -134,58 +134,3 @@ def test_api_missions_validate_invalid_mission():
 def test_api_missions_validate_bad_payload_returns_400():
     resp = client.post("/api/v1/missions/validate", json={"payload": "not json"})
     assert resp.status_code == 400
-
-
-def test_api_optimizer_evaluate_valid():
-    resp = client.post(
-        "/api/v1/optimizer/evaluate",
-        json={
-            "mission": _mission_dict(),
-            "constraints": {
-                "min_gsd": 2.0,
-                "max_gsd": 4.0,
-                "max_photo_count": 50,
-                "max_battery_count": 4,
-                "max_flight_time": 3600.0,
-                "allowed_capture_intervals": [1, 2, 3, 4, 5, 6],
-            },
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["valid"] is True
-    assert body["status"] == "VALID"
-    assert body["score"] is not None
-    assert body["score"]["total_score"] is not None
-    assert body["metrics"]["total_distance_m"] == 1000.0
-    assert body["validation"] is not None
-
-
-def test_api_optimizer_evaluate_invalid_mission():
-    bad = _mission_dict()
-    bad["metrics"]["gsd_cm"] = 0.0
-    resp = client.post("/api/v1/optimizer/evaluate", json={"mission": bad})
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["valid"] is False
-    assert body["status"] == "INVALID"
-    assert body["score"] is None
-
-
-def test_api_optimizer_evaluate_constraint_violation():
-    resp = client.post(
-        "/api/v1/optimizer/evaluate",
-        json={
-            "mission": _mission_dict(),
-            "constraints": {"max_photo_count": 5},
-        },
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["valid"] is False
-    assert any("constraint:" in w for w in body["warnings"])
-
-
-def test_api_optimizer_evaluate_bad_mission_returns_400():
-    resp = client.post("/api/v1/optimizer/evaluate", json={"mission": []})
-    assert resp.status_code in (400, 422)

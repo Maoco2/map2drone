@@ -6,8 +6,8 @@
 
 La Fase 10A consolidó la arquitectura de planificación en un **Planning Core**
 compartido y un **Universal Mission Model**, dejando el repositorio preparado
-para el **Photogrammetry Mission Optimizer** (Fase 10B). El optimizer automático
-**NO se implementó** en esta fase.
+para la **Fase 10B** (UMM extendido). El optimizer automático **NO se implementó**
+en esta fase y fue **descartado posteriormente** (decisión de producto).
 
 ---
 
@@ -199,19 +199,19 @@ pre-existente, no relacionada con la fase).
 
 ---
 
-## L. Preparación Fase 10B — Photogrammetry Mission Optimizer
+## L. Preparación Fase 10B — Universal Mission Model
 
-La arquitectura quedó lista para el optimizer:
+La arquitectura quedó lista para el **Universal Mission Model** como única fuente
+de verdad de la misión:
 1. **Planificación autoritativa en backend** (`planning/core` + `mission/`): el
-   optimizer iterará sobre parámetros (altitud, overlaps, drone/cámara,
-   turn_radius) llamando a `build_universal_mission` y comparando
-   `MissionMetrics` (tiempo, baterías, GSD, overlap efectivo) — todo desde una
-   única fuente de verdad.
+   UMM se construye llamando a `build_universal_mission` sobre el resultado de
+   los motores y consume `MissionMetrics` (tiempo, baterías, GSD, overlap
+   efectivo) — todo desde una única fuente de verdad.
 2. **`flight_lines_geojson` + `photo_points`** ya disponibles para coste de
    cobertura real.
 3. **Turn Radius real** ya integrado en `estimated_time_sec` y
    `battery_count`.
-4. El frontend solo consume resultados → el optimizador puede añadir una
-   pantalla de "plan óptimo vs plan actual" sin duplicar lógica.
+4. El frontend solo consume resultados → el UMM se exporta directamente sin
+   reconstruir nada en el cliente.
 5. Fases 9 (validación fixtures) y 10 (regresión) sientan la red de seguridad
    para iterar el motor sin regresiones.

@@ -6,9 +6,9 @@ turn-radius plan. No physics/formula is duplicated here:
 * straight-segment distances reuse the Planning Core UTM distance helpers;
 * turn distances / durations are copied from the Turn Radius plan output.
 
-Segments are a structural view for the future Optimizer (evaluate time,
-distance, photos, turns and energy per segment) and are never authoritative
-for the mission totals — the authoritative values stay in ``MissionMetrics``.
+Segments are a structural view (time, distance, photos, turns and energy per
+segment) and are never authoritative for the mission totals — the
+authoritative values stay in ``MissionMetrics``.
 """
 
 from __future__ import annotations

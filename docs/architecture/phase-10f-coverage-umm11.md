@@ -11,9 +11,10 @@
   (línea 492) en `CorridorResponse`, pero el **builder lo descarta**:
   `app/modules/mission/builder.py` hace `getattr(mission, "corridor_area_m2", None)`
   → el UniversalMission **no tiene el campo**.
-- **Score coverage** (`app/modules/optimizer/preferences.py`): al no existir área
-  proyectada ni footprint en la UMM, el componente es **`DATA_REQUIRED`** (no se
-  inventa cobertura; `test_coverage_is_data_required` lo fija).
+- **Cobertura**: al no existir área proyectada ni footprint en la UMM, la
+  cobertura **no se mide** (no se inventa; la UMM 1.0 no lleva esos campos). El
+  componente de score del optimizer (eliminado) era `DATA_REQUIRED`;
+  `test_coverage_is_data_required` lo fijaba.
 
 ## Propuesta de UMM 1.1 (deuda 10G)
 

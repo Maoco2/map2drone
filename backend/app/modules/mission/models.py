@@ -6,11 +6,10 @@ while remaining *backward compatible*: the legacy serializer emits the same
 flat shape the API responses and the frontend use, and the legacy reader
 accepts old blobs that lack the new fields.
 
-Fase 10B extends the model with the normative blocks consumed later by the
-Photogrammetry Mission Optimizer and by the exporters:
+Fase 10B extends the model with the normative blocks consumed by the exporters:
 
 * :class:`UniversalWaypoint` — a rich, per-waypoint structure.
-* :class:`FlightSegment` — flight/turn segmentation for the optimizer.
+* :class:`FlightSegment` — flight/turn segmentation.
 * :class:`CapturePlan` — capture mode + scientific/commercial intervals.
 * :class:`TurnPlan` — turn-radius plan adapted from the engine (no physics
   duplicated here).
@@ -150,9 +149,8 @@ class UniversalWaypoint(BaseModel):
 class FlightSegment(BaseModel):
     """A straight or turn segment between two waypoints.
 
-    The optimizer will evaluate time / distance / photos / turns / energy per
-    segment. Values are copied from the engines (metrics + turn plan); the
-    segment distances reuse the Planning Core distance helpers — no formula is
+    Values are copied from the engines (metrics + turn plan); the segment
+    distances reuse the Planning Core distance helpers — no formula is
     duplicated here.
     """
 
@@ -280,8 +278,7 @@ class CameraProfile(BaseModel):
 class MissionMetrics(BaseModel):
     """Consolidated mission metrics (Planning Core accounting model).
 
-    Fase 10B adds the normalized blocks the optimizer consumes; all values are
-    copied from the engines, never recomputed here.
+    All values are copied from the engines, never recomputed here.
     """
 
     total_distance_m: float = 0.0

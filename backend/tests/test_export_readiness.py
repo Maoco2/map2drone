@@ -5,14 +5,13 @@ BLOCKED with ``split_required`` (never a corrupt file), an INVALID turn-radius
 plan is BLOCKED, and a constrained plan is only a WARNING.
 """
 
-from fastapi.testclient import TestClient
-
-from app.main import app
+from app.core.database import get_db
+from app.models.schemas import Camera, Drone
 from app.modules.export.readiness import check_mission_readiness
+from app.modules.mission import build_universal_mission
 from app.modules.mission.models import TurnPlan
-from app.modules.mission.validation import parse_mission_blob
-
-client = TestClient(app)
+from app.modules.planning.engine import compute_grid
+from app.schemas.schemas import GridRequest
 
 _POLYGON = {
     "type": "Polygon",
@@ -39,15 +38,17 @@ _GRID = {
 
 
 def _winner_mission():
-    resp = client.post(
-        "/api/v1/optimizer/solve",
-        json={
-            "grid": _GRID,
-            "variables": {"variables": [{"name": "altitude_m", "mode": "candidate_values", "values": [250]}]},
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    return parse_mission_blob(resp.json()["best_candidate"]["mission"])
+    """Build a Universal Mission through the planning engine (same path the
+    planner endpoint uses) so the readiness diagnostic runs on a real mission."""
+    db = next(get_db())
+    try:
+        req = GridRequest(**_GRID)
+        result = compute_grid(req, db)
+        camera = db.query(Camera).filter(Camera.id == req.camera_id).first()
+        drone = db.query(Drone).filter(Drone.id == req.drone_id).first()
+        return build_universal_mission("grid", req, result, camera=camera, drone=drone)
+    finally:
+        db.close()
 
 
 def test_readiness_small_grid_lchm_ready():

@@ -5,10 +5,10 @@ the authoritative planning data; this builder copies them into the typed
 ``UniversalMission`` structure and produces the legacy flat serialization used
 for ``Mission.grid_result_json`` (backward compatible with existing blobs).
 
-Fase 10B additionally populates the rich blocks the Optimizer and exporters
-need: typed waypoints, flight segments, capture plan, turn plan and the
-drone/camera profiles. No formula is computed here — every value is copied
-from the engines.
+Fase 10B additionally populates the rich blocks the exporters need: typed
+waypoints, flight segments, capture plan, turn plan and the drone/camera
+profiles. No formula is computed here — every value is copied from the
+engines.
 """
 
 from __future__ import annotations
